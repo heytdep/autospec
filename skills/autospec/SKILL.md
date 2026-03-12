@@ -60,25 +60,133 @@ The orchestrator:
 - Passes workspace paths to the writer agent for journal assembly
 - Reads full outputs ONLY during escalation analysis (and only the relevant FAIL journals)
 
+---
+
 ## Phase 0: Setup
 
 1. Resolve `AUTOSPEC_ROOT` from the invocation context (the directory containing `program.md`).
 2. Read the spec, properties, and trust model.
-3. Detect the verifier: TLA+ -> TLC, Lean -> lean, ProVerif -> proverif.
-4. Create the run directory: `$AUTOSPEC_ROOT/runs/run_<timestamp>/`
+3. Detect the verifier: TLA+ -> TLC, Lean -> lean, ProVerif -> proverif. If verifier is not available, log this explicitly and proceed in degraded mode (hard gate skipped with `hard_gate: "skipped"` in every journal).
+4. Create the run directory: if `$AUTOSPEC_RUNS_DIR` is set, use `$AUTOSPEC_RUNS_DIR/run_<timestamp>/`; otherwise use `$AUTOSPEC_ROOT/runs/run_<timestamp>/`.
 5. Launch the `autospec-seeder` agent (sonnet) to initialize the techniques registry.
 6. Launch the `autospec-compartmentalizer` agent (sonnet) to split the spec.
 7. Wait for both. Send writer INIT_RUN with: compartmentalization result, seeded registry, config.
+8. Extract a 3-5 line trust model summary, store as `<RUN_DIR>/trust_model_summary.md`.
 
 If compartmentalizer returns single-compartment mode, proceed with one compartment (no intersection pipeline needed).
 
-## Phase 1: Improvement Loop
+**Initialize state variables** (this is the state you track for the entire run):
 
-For each step:
+```
+step = 0
 
-### 1a. Build CTX per compartment (incremental)
+per compartment:
+  consecutive_no_progress = 0
+  escalation_tier = 0    # 0=normal, 1=paper_search, 2=synthesis, 3=exhausted
+```
 
-COST OPTIMIZATION: don't re-send the full registry and trust model every step. Use incremental CTX.
+---
+
+## Phase 1: Loop
+
+This is the main loop. It runs until ALL compartments reach escalation_tier 3, or the user stops the run. There is NO fixed step limit.
+
+### The loop
+
+```
+while not ALL compartments have escalation_tier == 3:
+  step += 1
+
+  # 1. run improvement cycle for each non-exhausted compartment
+  for each compartment where escalation_tier < 3, in parallel:
+    result = run_improvement_cycle(compartment)
+    update_state(compartment, result)
+
+  # 2. process intersections
+  process_intersection_queues()
+
+  # 3. checkpoint
+  if step % F == 0:
+    write_checkpoint()
+
+  # 4. check escalation per compartment
+  for each compartment:
+    check_escalation(compartment)
+
+  # 5. report (every 3 steps)
+  if step % 3 == 0:
+    report_to_user()
+```
+
+### State update (after each step, per compartment)
+
+```
+update_state(compartment, result):
+  if result.status == OK:
+    compartment.consecutive_no_progress = 0
+    compartment.escalation_tier = 0    # real progress resets escalation
+  else:
+    compartment.consecutive_no_progress += 1
+```
+
+### Escalation check (after each step, per compartment)
+
+```
+check_escalation(compartment):
+  C = compartment
+
+  if C.escalation_tier == 0 and C.consecutive_no_progress >= P:
+    C.escalation_tier = 1
+    C.consecutive_no_progress = 0
+    run_paper_search(C)
+
+  elif C.escalation_tier == 1 and C.consecutive_no_progress >= S:
+    C.escalation_tier = 2
+    C.consecutive_no_progress = 0
+    run_paper_synthesis(C)
+
+  elif C.escalation_tier == 2 and C.consecutive_no_progress >= S:
+    C.escalation_tier = 3    # exhausted, skip in future steps
+```
+
+### Escalation actions
+
+**Tier 1: Paper search** (triggered at P consecutive no-progress while tier 0)
+- Read the FAIL journals for this compartment to identify the structural bottleneck
+- Search for papers targeting that bottleneck (this is the one exception to the "never read full outputs" rule)
+- Extract techniques into registry via writer UPDATE_REGISTRY
+- Send writer UPDATE_ESCALATION with tier=1
+- Resume improvement cycles with enriched context
+
+**Tier 2: Paper synthesis** (triggered at S consecutive no-progress while tier 1)
+- Use fetched papers + OK checkpoint + novel techniques to write synthesis documents
+- These are structured analyses: "given the current spec state and known techniques, here are unexplored directions"
+- Feed synthesis path into CTX for next steps
+- Send writer UPDATE_ESCALATION with tier=2
+
+**Tier 3: Exhausted** (triggered at S consecutive no-progress while tier 2)
+- Compartment stops receiving new steps
+- When ALL compartments reach tier 3, proceed to Phase 2: Finalization
+
+### Mandatory state reporting
+
+After EVERY step, log this table (to yourself and to the run status file):
+
+```
+| Compartment | Step Result | consecutive_no_progress | escalation_tier |
+|-------------|-------------|-------------------------|-----------------|
+| C1          | OK / FAIL   | <number>                | <0/1/2/3>       |
+| C2          | OK / FAIL   | <number>                | <0/1/2/3>       |
+| ...         | ...         | ...                     | ...             |
+```
+
+This is NOT optional. If you find yourself deciding to stop the loop, check this table. The loop stops ONLY when the rightmost column shows 3 for every row.
+
+---
+
+## Improvement Cycle (called from the loop, per compartment)
+
+### Build CTX (incremental)
 
 **Step 1 CTX** (full):
 - Current compartment spec path
@@ -90,17 +198,14 @@ COST OPTIMIZATION: don't re-send the full registry and trust model every step. U
 **Step N CTX** (incremental, N > 1):
 - Current compartment spec path
 - Relevant property IDs
-- Trust model path: OMIT (unchanged, agent already read it in step 1... but agents are fresh instances, so include a 1-line trust model summary instead of the full file)
-- Registry diff: path to `<RUN_DIR>/registry_diff_<N>.json` containing only entries added or updated since last step. The orchestrator writes this small file before launching the proposer.
-- Journal context: path to last OK journal + paths to FAIL journals since (same as before)
+- Trust model summary path (not full file)
+- Registry diff: path to `<RUN_DIR>/registry_diff_<N>.json` containing only entries added or updated since last step
+- Journal context: path to last OK journal + paths to FAIL journals since
+- Escalation context (if tier 1+): technique summaries from papers, bottleneck analysis, synthesis docs
 
 The orchestrator maintains a `registry_version` counter. After each UPDATE_REGISTRY, increment it. Before each step, diff the current registry against the version the proposer last saw. Write only the diff to `registry_diff_<N>.json`.
 
-For the trust model summary: extract a 3-5 line summary from the trust model file once during Phase 0, store as `<RUN_DIR>/trust_model_summary.md`. Pass this path in step 2+ CTX instead of the full trust model.
-
-### 1b. Launch improvement cycles
-
-For each compartment:
+### Triad execution
 
 **Pre-triad**: send writer batch [STEP_STARTED, AGENT_STARTED(proposer)]
 
@@ -118,24 +223,29 @@ For each compartment:
 6. Judge writes `<step_dir>/judgment.json`, returns summary.
 
 If judge summary says REVISE: send writer AGENT_FINISHED(judge), launch new proposer with revision guidance path. Max 2 revision rounds.
-If judge summary says REJECT: send writer batch [AGENT_FINISHED(judge), WRITE_JOURNAL, UPDATE_REGISTRY].
+If judge summary says REJECT: send writer batch [AGENT_FINISHED(judge), WRITE_JOURNAL, UPDATE_REGISTRY]. Return FAIL.
 If judge summary says ACCEPT: send writer AGENT_FINISHED(judge), proceed to hard gate.
 
-### 1c. Hard gate
+### Hard gate
+
 Apply the diff to a copy of the spec. Run the verifier:
 - TLA+: `tlc -config <config> <spec>.tla` - all properties must pass
 - Lean: `lean <file>.lean` - must type-check
 - ProVerif: `proverif <file>.pv` - all queries must pass
 
-If hard gate fails: send writer batch [WRITE_JOURNAL, UPDATE_REGISTRY] with hard gate result.
+If hard gate fails: send writer batch [WRITE_JOURNAL, UPDATE_REGISTRY] with hard gate result. Return FAIL.
 
-### 1d. Structural verification
-If hard gate passes, launch a second triad (agents read from the same step dir). Track agent starts/finishes via batched writer calls.
+If hard gate CANNOT be run: log `hard_gate: "skipped"` in the journal. Proceed to structural verification but flag the degraded mode. Do NOT silently omit the hard gate.
 
-If structural claim unsubstantiated: send writer batch [WRITE_JOURNAL, UPDATE_REGISTRY] with failure_reason.
-If structural claim holds: send writer batch [WRITE_JOURNAL, UPDATE_REGISTRY] with status=OK.
+### Structural verification
 
-### 1e. Intersection pipeline
+If hard gate passes (or is explicitly skipped), launch a second triad (agents read from the same step dir). Track agent starts/finishes via batched writer calls.
+
+If structural claim unsubstantiated: send writer batch [WRITE_JOURNAL, UPDATE_REGISTRY] with failure_reason. Return FAIL.
+If structural claim holds: send writer batch [WRITE_JOURNAL, UPDATE_REGISTRY] with status=OK. Return OK.
+
+### Intersection pipeline
+
 If the change affects intersection variables:
 - Push update to intersection queue
 - The intersection processing happens after all compartments finish their step
@@ -143,10 +253,11 @@ If the change affects intersection variables:
 - After intersection commit: run full-spec consistency check
 - Send writer WRITE_INTERSECTION_UPDATE
 
-### 1f. Checkpoint
+### Checkpoint
+
 If step % F == 0: launch `autospec-checkpoint` agent (sonnet). It reads journals from the run dir, writes checkpoint to file, returns summary. Send writer WRITE_CHECKPOINT with the path.
 
-### 1g. Technique registry update + novelty (tiered)
+### Technique registry update + novelty (tiered)
 
 After every journal write, the UPDATE_REGISTRY is already included in the WRITE_JOURNAL batch.
 
@@ -158,31 +269,11 @@ For novel technique detection:
     - When deep agent completes: send writer UPDATE_REGISTRY with promotion/reclassification
 - FAIL step: already handled in UPDATE_REGISTRY
 
-## Phase 2: Escalation
+---
 
-Track consecutive non-progress per compartment (section 8.1 of program.md).
+## Phase 2: Finalization
 
-During escalation, the orchestrator MAY read FAIL journal files to identify bottlenecks. This is the one exception to the "never read full outputs" rule.
-
-### Tier 1 (P steps no progress): Paper search
-- Read relevant FAIL journals to identify bottleneck
-- Search for papers targeting that bottleneck
-- Extract techniques into registry via writer UPDATE_REGISTRY
-- Send writer UPDATE_ESCALATION with tier=1
-- Resume with enriched context for S steps
-
-### Tier 2 (P+S steps no progress): Paper synthesis
-- Use papers + OK checkpoint + novel techniques to write synthesis documents
-- Feed synthesis path into CTX for S more steps
-- Send writer UPDATE_ESCALATION with tier=2
-
-### Tier 3 (P+2S steps no progress): Exit
-- Run on ALL compartments must be stuck, not just one
-- Proceed to finalization
-
-## Phase 3: Finalization
-
-Produce all output artifacts (program.md section 12):
+Produce all output artifacts (program.md section 11):
 1. Final spec (assembled from all compartments)
 2. Delta report
 3. Final techniques registry
@@ -191,6 +282,8 @@ Produce all output artifacts (program.md section 12):
 6. Novel contributions summary
 
 Write to `runs/run_<timestamp>/output/`. Send writer FINALIZE_RUN to mark status as completed.
+
+---
 
 ## Cost Model
 
@@ -211,8 +304,6 @@ Write to `runs/run_<timestamp>/output/`. Send writer FINALIZE_RUN to mark status
 - Never dump full journal history into an agent's context. Pass file paths.
 - When filtering between rounds (proposer -> reviewer -> judge), agents read prior outputs from workspace files. The orchestrator does NOT relay content.
 - If a compartment is progressing and another is stuck, don't block the progressing one.
-- The exit condition requires ALL compartments to be stuck at tier 3.
-- After every 3 steps, briefly report status to the user: which compartments progressed, which are stuck, any novel techniques discovered.
 - Batch writer operations to minimize agent launches.
 - Use incremental CTX (registry diffs, trust model summary) for step 2+.
 

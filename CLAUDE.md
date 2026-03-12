@@ -5,8 +5,11 @@ Formal specification auto-research system. See `program.md` for the full design.
 ## Skills
 
 - `autospec`: main orchestrator. Invoke with `autospec <spec_path> --properties <props_path> --trust-model <tm_path>`
+- `publish-job`: create a job for the remote executor and push to the queue
+- `poll-jobs`: poll the job queue, claim and execute pending jobs (executor-side, use with `/loop 5m /poll-jobs`)
+- `job-status`: check executor status and job queue state from the publisher machine
 
-Skill definition: `skills/autospec/SKILL.md`
+Skill definitions in `skills/*/SKILL.md`
 
 ## Agents
 
