@@ -8,7 +8,7 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 MAX_SESSIONS=10
-POLL_INTERVAL=300
+POLL_INTERVAL=60
 LOCK_DIR="/tmp/autospec-executor-locks"
 LOG_DIR="$REPO_ROOT/executor/logs"
 
