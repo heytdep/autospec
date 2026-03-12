@@ -1,18 +1,22 @@
 ---
 name: poll-jobs
-description: Poll the job queue, claim and execute pending jobs. Designed for `/loop 5m /poll-jobs` on the executor.
+description: Poll the job queue, claim and execute a pending job. Each invocation is a fresh ephemeral session spawned by executor/run.sh.
 ---
 
 # Poll Jobs
 
-Single iteration of the executor job loop. Pull the repo, check for queued jobs, execute if found.
+Single iteration of the executor. Claim one queued job, execute it, mark complete or failed.
+
+## Architecture
+
+The executor runs via cron, not `/loop`. Every 5 minutes, `executor/run.sh` checks for queued jobs and spawns a fresh `claude` session per job (up to MAX_SESSIONS in parallel). Each session runs this skill, then exits. No context bloat, no process management.
 
 ## Procedure
 
 ### 1. Pull latest
 
 ```bash
-cd $AUTOSPEC_ROOT/techniques
+cd $REPO_ROOT/techniques
 git pull --rebase
 ```
 
@@ -41,6 +45,8 @@ git add jobs/active/<job>.md
 git commit -m "claim job: <job_id>"
 git push
 ```
+
+If the push fails because another session claimed a job concurrently, pull --rebase and check if YOUR job was already claimed by someone else. If so, pick the next queued job or exit.
 
 ### 4. Execute job
 
@@ -99,7 +105,6 @@ git push
 
 ## Notes
 
-- The executor processes one job at a time. If a job is running when `/loop` fires again, the new invocation should check `jobs/active/` first: if there's already an active job owned by this executor, skip to heartbeat-only (the original invocation is still handling it).
-- The publisher can queue jobs at any time regardless of executor state. Queue writes and job execution never conflict (different directories, different machines).
-- Always push after claiming so the publisher sees the state change immediately.
+- Each session claims exactly one job. Parallelism comes from cron spawning multiple sessions, not from one session handling multiple jobs.
+- The git mv claim mechanism prevents double-claiming. If two sessions race for the same job, one will fail the push and should pick another.
 - If `git push` fails (remote ahead), pull --rebase and retry once. If still failing, log and continue.
