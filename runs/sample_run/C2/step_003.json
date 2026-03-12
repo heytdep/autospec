@@ -1,0 +1,48 @@
+{
+  "run_id": "sample_run",
+  "step": 3,
+  "compartment": "C2",
+  "timestamp": "2026-03-10T10:10:00Z",
+  "status": "OK",
+  "proposal": {
+    "technique": "T001",
+    "technique_name": "signature aggregation",
+    "target_actions": [
+      "AckEntry"
+    ],
+    "claim": "aggregate ack signatures: O(n) individual sigs to O(1) aggregate",
+    "structural_delta": "communication complexity: ack messages shrink from O(n) sigs to O(1)",
+    "diff": "--- a/log_replication.tla\n+++ b/log_replication.tla\n@@ -20,5 +20,5 @@\n AckEntry(replica, entry_id) ==\n-  /\\ acks' = [acks EXCEPT ![entry_id] = acks[entry_id] \\cup {<<replica, Sign(replica, entry_id)>>}]\n+  /\\ acks' = [acks EXCEPT ![entry_id] = AggregateSig(acks[entry_id], replica, entry_id)]"
+  },
+  "review": {
+    "verdict": "APPROVE",
+    "argument": "aggregation applies cleanly, distinct signers on same entry_id"
+  },
+  "judgment": {
+    "ruling": "ACCEPT",
+    "reasoning": "preconditions met, straightforward application"
+  },
+  "hard_gate": {
+    "ran": true,
+    "passed": true,
+    "verifier": "TLC",
+    "state_space_before": 98304,
+    "state_space_after": 87210,
+    "properties_checked": [
+      "LogMatching",
+      "LeaderCompleteness",
+      "StateMachineSafety"
+    ],
+    "counterexample": null
+  },
+  "structural_verification": {
+    "ran": true,
+    "claim_substantiated": true,
+    "evidence": "AckEntry produces single aggregate instead of set of individual sigs"
+  },
+  "failure_reason": null,
+  "technique_registry_update": {
+    "action": "updated",
+    "technique_id": "T001"
+  }
+}

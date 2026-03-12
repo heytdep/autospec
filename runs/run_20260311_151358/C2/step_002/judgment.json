@@ -1,0 +1,14 @@
+{
+  "step": 2,
+  "compartment": "C2",
+  "ruling": "ACCEPT",
+  "confidence": 0.95,
+  "summary": "Both required documentation fixes applied. Bug is real, fix is structurally sound, documentation is now accurate. Proposal advances.",
+
+  "basis": {
+    "bug_validity": "confirmed. CEViewChange UNCHANGED msgs_ce_to_ob (line 322), OBReceiveMFR no session guard (line 391). Stale cross-session MFRs are consumable, producing phantom CEFinalizations.",
+    "fix_soundness": "confirmed. Session guard msg.session = ob_cached_ce_session[m] closes the gap. DownstreamOBReceiveCEViewChange correctly caches vc.session. UNCHANGED coverage complete.",
+    "j1_resolved": "properties_affected = []. properties_note accurately explains semantic gap and names a candidate new property.",
+    "j2_resolved": "init_coupling_note documents the ob_cached_ce_session=1 / ce_primary=1 invariant and the deadlock consequence of divergence."
+  }
+}

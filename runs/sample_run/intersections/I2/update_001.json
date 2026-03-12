@@ -1,0 +1,10 @@
+{
+  "step": 10,
+  "source_compartment": "C3",
+  "type": "protocol_restructure",
+  "description": "view change now pull-based instead of broadcast",
+  "affected_vars": [
+    "log"
+  ],
+  "status": "committed"
+}

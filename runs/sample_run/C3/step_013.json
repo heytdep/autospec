@@ -1,0 +1,47 @@
+{
+  "run_id": "sample_run",
+  "step": 13,
+  "compartment": "C3",
+  "timestamp": "2026-03-10T11:00:00Z",
+  "status": "OK",
+  "proposal": {
+    "technique": "T003",
+    "technique_name": "trust assumption exploitation (TEE)",
+    "target_actions": [
+      "InstallNewView"
+    ],
+    "claim": "TEE attestation makes per-message VC proof verification redundant",
+    "structural_delta": "protocol complexity: remove per-message verification in InstallNewView",
+    "diff": "--- a/view_change.tla\n+++ b/view_change.tla\n InstallNewView(new_leader) ==\n-  /\\ \\A msg \\in vc_messages[new_leader]: VerifyVCProof(msg)\n   /\\ Cardinality(vc_messages[new_leader]) * 2 > Cardinality(Replicas)"
+  },
+  "review": {
+    "verdict": "APPROVE",
+    "argument": "TEE attestation makes message forgery impossible"
+  },
+  "judgment": {
+    "ruling": "ACCEPT",
+    "reasoning": "trust model covers this"
+  },
+  "hard_gate": {
+    "ran": true,
+    "passed": true,
+    "verifier": "TLC",
+    "state_space_before": 52400,
+    "state_space_after": 47100,
+    "properties_checked": [
+      "ViewMonotonicity",
+      "RollbackSafety"
+    ],
+    "counterexample": null
+  },
+  "structural_verification": {
+    "ran": true,
+    "claim_substantiated": true,
+    "evidence": "VerifyVCProof loop removed"
+  },
+  "failure_reason": null,
+  "technique_registry_update": {
+    "action": "updated",
+    "technique_id": "T003"
+  }
+}

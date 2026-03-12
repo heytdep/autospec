@@ -1,0 +1,57 @@
+{
+  "step": 4,
+  "compartment": "C1",
+  "reviewer_verdict": "REJECT",
+  "confidence": 0.88,
+  "summary": "The proposal identifies a real behavioral pattern (old-session pending fills surviving in ob_archiver_pending after OB view change) but fails to demonstrate that processing them violates any C1 property. The claimed consequence (spurious MFR+Snapshot) is not a property violation, it is a design judgment about whether CE should confirm old-session fills. The spec as written deliberately allows this, and the fix introduces new state and a new action with a liveness hazard.",
+  "analysis": {
+    "trace_validity": {
+      "correct": true,
+      "note": "The 7-step trace (proposal line 10) is accurate. Old-session pending fills do survive in ob_archiver_pending, and CEProcessRecoveredPending will process them after CE view change because the dedup set ce_recovered_pending is cleared (spec:315)."
+    },
+    "consequence_assessment": {
+      "overstated": true,
+      "detail": "The proposal claims 'spurious MFR+Snapshot effects in ce_log corresponding to fills that no current OB session owns. These effects consume CE sequence numbers and broadcast to downstream consumers for fills that will never receive CEFinalization on the current OB session.' However: (1) CEProcessRecoveredPending does NOT send msgs_ce_to_ob (spec:341-345 UNCHANGED clause includes msgs_ce_to_ob), so no CEFinalization message is ever produced for recovered pending fills regardless of session. The claim about 'never receiving CEFinalization' is misleading because recovered pending fills ALREADY never trigger CEFinalization in the current spec. (2) The pending fill was genuinely produced by OB before it crashed. CE confirming it via MFR is semantically correct: the fill happened. The OB rolling back its pending log does not un-happen the fill, it means the OB will not track it anymore. (3) No C1 property is violated. P2 (sequence monotonicity) is preserved. P4 (surgical rollback) is unaffected. P9 (log bounded) holds. P12 (backup applied valid) holds. P15 (CEPendingRecoveryBounded) explicitly has the 'pa.session /= ob_primary[pa.market]' escape clause, demonstrating the spec designers anticipated old-session pending fills coexisting in archiver stores."
+    },
+    "property_violation_check": {
+      "P2_CESequenceMonotonic": "not violated: new MFR+Snapshot get unique sequence numbers regardless of pending fill origin session",
+      "P4_SurgicalRollbackPrecision": "not affected: concerns CE's own session rollback, not OB sessions",
+      "P9_CELogBounded": "not violated: ce_seq still incremented correctly",
+      "P12_CEBackupAppliedValid": "not violated: MFR+Snapshot added to ce_log and broadcast, backup can apply them",
+      "P1_TypeInvariant": "not violated",
+      "P6_PhantomLeaderRejection": "not affected",
+      "P16_DownstreamCacheCoherence": "not affected",
+      "P17_OMSMutedUntilCaughtUp": "not affected",
+      "P18_CEArchiverSafetyGuarantee": "not affected",
+      "P19_ArchiverDAMonotonicity": "not affected"
+    },
+    "design_intent_evidence": "P15 (CEPendingRecoveryBounded) includes the disjunct 'pa.session /= ob_primary[pa.market]', which explicitly accounts for old-session pending fills persisting in archiver stores. If old-session fills were meant to be rejected, P15 would not have this escape clause. The spec models archiver stores as append-only (domain fact #5: archivers are fire-and-forget, no cleanup). The session mismatch is by design.",
+    "proposed_fix_concerns": [
+      {
+        "severity": "medium",
+        "issue": "Liveness hazard acknowledged but insufficiently mitigated. The proposal adds WF_vars(CEReceiveOBViewChange) but CE must receive the OB VC message BEFORE processing any pending fills from the new session. Under message reordering, CE could receive new-session pending fills (via archiver) before the OB VC message, blocking them until the VC arrives. This creates a temporal dependency that does not exist in the current spec.",
+        "spec_lines": "proposal diff, CEReceiveOBViewChange action"
+      },
+      {
+        "severity": "medium",
+        "issue": "ce_cached_ob_session initialization to 1 assumes OB sessions start at 1. This is true in the current spec (Init sets ob_primary to [m \\in Markets |-> 1]) but is a coupling assumption. If OB session numbering changes, the init silently breaks the gate.",
+        "spec_lines": "proposal diff, new_variable init"
+      },
+      {
+        "severity": "low",
+        "issue": "The new CEReceiveOBViewChange action uses UNCHANGED msgVars, meaning it does not consume the OB VC message from msgs_view_change. This matches the existing pattern (DownstreamOMSReceiveOBViewChange also does not consume). Consistent but adds another reader of the shared VC message set.",
+        "spec_lines": "proposal diff, CEReceiveOBViewChange"
+      },
+      {
+        "severity": "high",
+        "issue": "Interaction with step 3 accepted proposal. Step 3 collapses MFR+Snapshot to single MFR. This proposal's diff still references MFR+Snapshot pairs in CEProcessRecoveredPending. If both proposals are applied, they conflict on the same action. The proposer did not account for the step 3 change.",
+        "spec_lines": "proposal diff, CEProcessRecoveredPending replacement"
+      }
+    ]
+  },
+  "domain_fact_check": {
+    "fact_1_CE_fills_immediately": "Not contradicted. Proposal does not gate fill processing, only recovered pending processing.",
+    "fact_5_archivers_fire_and_forget": "Relevant. Archivers do not clear old-session data. This is by design per domain fact #5. The proposal treats this as a bug, but it is expected behavior."
+  },
+  "verdict_reasoning": "The proposal solves a non-problem. Processing old-session pending fills is not a property violation in any C1 property. P15 explicitly anticipates old-session data persisting. The proposed fix adds a new variable, a new action, and a liveness hazard to prevent behavior that the spec intentionally allows. Additionally, the diff conflicts with the already-accepted step 3 proposal on CEProcessRecoveredPending. REJECT."
+}

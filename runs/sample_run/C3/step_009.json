@@ -1,0 +1,47 @@
+{
+  "run_id": "sample_run",
+  "step": 9,
+  "compartment": "C3",
+  "timestamp": "2026-03-10T10:40:00Z",
+  "status": "OK",
+  "proposal": {
+    "technique": "T001",
+    "technique_name": "signature aggregation",
+    "target_actions": [
+      "CollectViewChangeMessages"
+    ],
+    "claim": "aggregate VC message signatures: O(n) to O(1)",
+    "structural_delta": "message size: VC proof shrinks from O(n) sigs to O(1) aggregate",
+    "diff": "--- a/view_change.tla\n+++ b/view_change.tla\n CollectViewChangeMessages(new_leader, sender, msg) ==\n-  /\\ vc_messages' = [...\\cup {<<sender, Sign(sender, msg)>>}]\n+  /\\ vc_messages' = [... AggregateSig(...)]"
+  },
+  "review": {
+    "verdict": "APPROVE",
+    "argument": "same pattern as step 3, distinct signers"
+  },
+  "judgment": {
+    "ruling": "ACCEPT",
+    "reasoning": "clean reapplication"
+  },
+  "hard_gate": {
+    "ran": true,
+    "passed": true,
+    "verifier": "TLC",
+    "state_space_before": 67000,
+    "state_space_after": 58100,
+    "properties_checked": [
+      "ViewMonotonicity",
+      "RollbackSafety"
+    ],
+    "counterexample": null
+  },
+  "structural_verification": {
+    "ran": true,
+    "claim_substantiated": true,
+    "evidence": "VC proof now O(1)"
+  },
+  "failure_reason": null,
+  "technique_registry_update": {
+    "action": "updated",
+    "technique_id": "T001"
+  }
+}

@@ -1,0 +1,88 @@
+{
+  "step": 4,
+  "compartment": "C1",
+  "technique": "D206",
+  "technique_name": "multi-source vector clocking with per-source cursors",
+  "target_actions": ["CEProcessRecoveredPending"],
+  "claim": "CEProcessRecoveredPending lacks OB session freshness gate, allowing processing of pending fills from rolled-back OB sessions. Adding session guard eliminates stale-session MFR production.",
+  "rationale": {
+    "problem": "CEProcessRecoveredPending (line 327-345) iterates ob_archiver_pending without checking whether the pending action's OB session is still current. After an OB view change (session N -> N+1), old-session pending fills (session=N) remain in archiver stores. When CE recovers and processes them, it produces MFR+Snapshot effects for fills that the current OB session has discarded. The dedup set ce_recovered_pending (keyed on pending_seq, session, market) does not prevent this because the old-session key is novel to the new CE session (ce_recovered_pending is cleared on CE view change, line 315).",
+    "trace": "1. OB session 1 produces PendingFill(pending_seq=1, session=1, market=m1). 2. Archiver ingests it. 3. OB crashes, view changes to session 2 (old pending log discarded, line 442). 4. CE crashes, view changes (ce_recovered_pending cleared, line 315). 5. CE reads ob_archiver_pending, finds PendingFill(pending_seq=1, session=1, market=m1). 6. Dedup check passes: <<1, 1, m1>> not in empty ce_recovered_pending. 7. CE produces MFR+Snapshot for a fill from a dead OB session.",
+    "consequence": "Spurious MFR+Snapshot effects in ce_log corresponding to fills that no current OB session owns. These effects consume CE sequence numbers and broadcast to downstream consumers for fills that will never receive CEFinalization on the current OB session.",
+    "technique_fit": "D206 prescribes per-source session cursors to reject stale updates. CE should cache the current OB session per market and gate pending processing on session freshness. The OB view change message channel (msgs_view_change with svc='OB') already provides this information."
+  },
+  "diff": {
+    "description": "Add ce_cached_ob_session variable (per-market map of latest known OB session), update it from OB view change messages, and gate CEProcessRecoveredPending on session freshness.",
+    "new_variable": {
+      "name": "ce_cached_ob_session",
+      "type": "[m \\in Markets |-> Nat]",
+      "initial": "[m \\in Markets |-> 1]",
+      "semantics": "Tracks the latest OB session per market as learned from OB view change messages. Used to filter stale pending actions during recovery."
+    },
+    "changes": [
+      {
+        "location": "VARIABLES block (after ce_recovered_pending, line 43)",
+        "action": "add",
+        "old": "    ce_recovered_pending,",
+        "new": "    ce_recovered_pending,\n    ce_cached_ob_session,"
+      },
+      {
+        "location": "ceVars tuple (line 93-95)",
+        "action": "replace",
+        "old": "ceVars == <<ce_alive, ce_seq, ce_log, ce_primary, ce_authority_ts,\n            ce_checkpoint_seq, ce_last_recovered_seq, ce_backup_applied,\n            ce_backup_alive, ce_recovered_pending>>",
+        "new": "ceVars == <<ce_alive, ce_seq, ce_log, ce_primary, ce_authority_ts,\n            ce_checkpoint_seq, ce_last_recovered_seq, ce_backup_applied,\n            ce_backup_alive, ce_recovered_pending, ce_cached_ob_session>>"
+      },
+      {
+        "location": "TypeInvariant (after ce_recovered_pending type, around line 129)",
+        "action": "add after ce_recovered_pending type check",
+        "new_line": "    /\\ \\A m \\in Markets : ce_cached_ob_session[m] \\in Nat"
+      },
+      {
+        "location": "Init (after ce_recovered_pending init, line 167)",
+        "action": "add",
+        "new_line": "    /\\ ce_cached_ob_session = [m \\in Markets |-> 1]"
+      },
+      {
+        "location": "CEProcessRecoveredPending (line 327-345)",
+        "action": "replace",
+        "old": "CEProcessRecoveredPending ==\n    /\\ ce_alive\n    /\\ ce_seq + 1 <= MaxSeq\n    /\\ \\E a \\in OBArchivers :\n        /\\ ob_archiver_pending[a] /= {}\n        /\\ \\E pa \\in ob_archiver_pending[a] :\n            /\\ <<pa.pending_seq, pa.session, pa.market>> \\notin ce_recovered_pending\n            /\\ LET mfr == [type |-> \"MFR\", seq |-> ce_seq, session |-> ce_primary]\n                   snap == [type |-> \"Snapshot\", seq |-> ce_seq + 1, session |-> ce_primary]\n               IN /\\ ce_log' = ce_log \\union {mfr, snap}\n                  /\\ ce_seq' = ce_seq + 2\n                  /\\ msgs_ce_broadcast' = msgs_ce_broadcast \\union {mfr, snap}\n                  /\\ ce_recovered_pending' = ce_recovered_pending \\union\n                         {<<pa.pending_seq, pa.session, pa.market>>}\n    /\\ UNCHANGED <<ce_alive, ce_primary, ce_authority_ts, ce_checkpoint_seq,\n                   ce_last_recovered_seq, ce_backup_applied, ce_backup_alive,\n                   msgs_ce_to_ob, msgs_ob_to_ce, msgs_ob_broadcast, msgs_view_change,\n                   obVars, omsVars, cacheVars,\n                   archiverVars, obBackupVars>>",
+        "new": "CEProcessRecoveredPending ==\n    /\\ ce_alive\n    /\\ ce_seq + 1 <= MaxSeq\n    /\\ \\E a \\in OBArchivers :\n        /\\ ob_archiver_pending[a] /= {}\n        /\\ \\E pa \\in ob_archiver_pending[a] :\n            /\\ pa.session = ce_cached_ob_session[pa.market]\n            /\\ <<pa.pending_seq, pa.session, pa.market>> \\notin ce_recovered_pending\n            /\\ LET mfr == [type |-> \"MFR\", seq |-> ce_seq, session |-> ce_primary]\n                   snap == [type |-> \"Snapshot\", seq |-> ce_seq + 1, session |-> ce_primary]\n               IN /\\ ce_log' = ce_log \\union {mfr, snap}\n                  /\\ ce_seq' = ce_seq + 2\n                  /\\ msgs_ce_broadcast' = msgs_ce_broadcast \\union {mfr, snap}\n                  /\\ ce_recovered_pending' = ce_recovered_pending \\union\n                         {<<pa.pending_seq, pa.session, pa.market>>}\n    /\\ UNCHANGED <<ce_alive, ce_primary, ce_authority_ts, ce_checkpoint_seq,\n                   ce_last_recovered_seq, ce_backup_applied, ce_backup_alive,\n                   ce_cached_ob_session,\n                   msgs_ce_to_ob, msgs_ob_to_ce, msgs_ob_broadcast, msgs_view_change,\n                   obVars, omsVars, cacheVars,\n                   archiverVars, obBackupVars>>"
+      },
+      {
+        "location": "New action: CEReceiveOBViewChange (add after CEProcessRecoveredPending)",
+        "action": "add",
+        "new": "CEReceiveOBViewChange ==\n    /\\ ce_alive\n    /\\ \\E vc \\in msgs_view_change :\n        /\\ vc.svc = \"OB\"\n        /\\ vc.session > ce_cached_ob_session[vc.market]\n        /\\ ce_cached_ob_session' = [ce_cached_ob_session EXCEPT ![vc.market] = vc.session]\n    /\\ UNCHANGED <<ce_alive, ce_seq, ce_log, ce_primary, ce_authority_ts,\n                   ce_checkpoint_seq, ce_last_recovered_seq, ce_backup_applied,\n                   ce_backup_alive, ce_recovered_pending,\n                   msgVars, obVars, omsVars, cacheVars, archiverVars, obBackupVars>>"
+      },
+      {
+        "location": "CEViewChange UNCHANGED clause (line 321-323)",
+        "action": "replace",
+        "old": "    /\\ UNCHANGED <<ce_checkpoint_seq,\n                   msgs_ce_broadcast, msgs_ce_to_ob, msgs_ob_to_ce, msgs_ob_broadcast,\n                   obVars, omsVars, cacheVars, archiverVars, obBackupVars>>",
+        "new": "    /\\ UNCHANGED <<ce_checkpoint_seq, ce_cached_ob_session,\n                   msgs_ce_broadcast, msgs_ce_to_ob, msgs_ob_to_ce, msgs_ob_broadcast,\n                   obVars, omsVars, cacheVars, archiverVars, obBackupVars>>"
+      },
+      {
+        "location": "All other CE actions UNCHANGED clauses",
+        "action": "add ce_cached_ob_session to UNCHANGED for: CEProduceDirectEffect, CEProcessFill, CEBackupApply, CEBackupCrash, CECheckpoint, CECrash",
+        "note": "ce_cached_ob_session is part of ceVars, so actions using UNCHANGED <<ceVars, ...>> implicitly cover it. For CE actions that list individual variables, ce_cached_ob_session must be added to their UNCHANGED clauses."
+      },
+      {
+        "location": "Next state relation (after line 781)",
+        "action": "add",
+        "new_line": "    \\/ CEReceiveOBViewChange"
+      },
+      {
+        "location": "Fairness (after CEProcessRecoveredPending WF, line 823)",
+        "action": "add",
+        "new_line": "    /\\ WF_vars(CEReceiveOBViewChange)"
+      }
+    ]
+  },
+  "risk_assessment": {
+    "blocked_areas_respected": true,
+    "anchor_checkpoint_touched": false,
+    "backup_contiguity_touched": false,
+    "fill_snapshot_touched": false,
+    "new_variable_count": 1,
+    "new_action_count": 1,
+    "potential_liveness_concern": "If CE never receives the OB view change message (message loss), ce_cached_ob_session stays at old session, blocking processing of new-session pending actions. Mitigated by: WF on CEReceiveOBViewChange ensures eventual delivery if OB VC message exists. OB VC messages persist in msgs_view_change until LoseViewChange drops them. Under partial synchrony assumption, the message is eventually delivered."
+  }
+}

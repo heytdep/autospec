@@ -1,0 +1,56 @@
+{
+  "step": 5,
+  "compartment": "C3",
+  "technique": "D206",
+  "technique_name": "multi-source vector clocking with per-source cursors",
+  "target_actions": ["INV11_OMSCursorConsistency"],
+  "claim": "P11 (OMSCursorConsistency) checks only >= 0, which is trivially true for natural-valued cursors; replacing it with log-bounded + session-consistency + seq-uniqueness conjuncts (mirroring INV9/INV10 patterns) turns P11 into a meaningful structural invariant that catches log corruption, cross-session contamination, and duplicate-seq bugs",
+  "problem": {
+    "description": "INV11_OMSCursorConsistency (line 927-933) checks three conditions: oms_ce_cursor[p] >= 0, oms_ob_cursor[p][m] >= 0, oms_pending_cursor[p][m] >= 0. All three are trivially maintained because: (1) cursors are initialized to 0 (line 191-193), (2) every cursor-modifying action either increments by 1 (OMSConsumeCE line 469, OMSConsumeOB line 485, OMSConsumePending line 502), sets to MaxContiguousFrom output which is >= start-1 >= 0 (OMSViewChange lines 516-519), sets to MinOfTwo(current, vc.last_recovered) where both are >= 0 (DownstreamOMSReceiveOBViewChange line 613), or resets to 0 (OMSViewChange line 528). No action can make any cursor negative. The invariant provides zero verification value. Meanwhile, the OMS log lacks the structural bounds that INV9 (CELogBounded: e.seq < ce_seq) and INV10 (OBLogBounded: e.seq < ob_seq[m]) provide for CE and OB logs. There is no check that OMS log effects belong to the current session, and no check that OMS log seq values are unique.",
+    "trace": [
+      "INV9 checks: \\A e \\in ce_log : e.seq < ce_seq (line 914-915). Meaningful: catches log corruption where effect seq >= production counter.",
+      "INV10 checks: \\A e \\in ob_log[m] : e.seq < ob_seq[m] (line 920-922). Meaningful: same pattern for OB.",
+      "INV11 checks: oms_ce_cursor[p] >= 0, oms_ob_cursor[p][m] >= 0, oms_pending_cursor[p][m] >= 0 (line 927-931). Trivial: structurally impossible to violate.",
+      "Gap: no \\A e \\in oms_log[p] : e.seq < oms_seq[p] exists anywhere in the spec.",
+      "Gap: no check that oms_log effects have session = oms_primary[p].",
+      "Gap: no dedup check for OMS log (INV7 covers CE archivers but not OMS log)."
+    ],
+    "consequence": "P11 cannot catch any real bug. A specification error that corrupts OMS log entries (wrong seq, wrong session, duplicate seq) would pass all current invariants. The OMS log is the least-constrained log in the spec despite being downstream of both CE and OB."
+  },
+  "fix": {
+    "description": "Replace the three vacuous >= 0 conjuncts with three meaningful structural conjuncts while retaining the >= 0 checks for completeness. The new conjuncts mirror existing patterns (INV9/INV10 for log bounding, INV7 for dedup) applied to OMS. No action changes, only the invariant definition changes.",
+    "diff": [
+      {
+        "action": "INV11_OMSCursorConsistency (invariant definition)",
+        "location": "lines 927-933",
+        "old": "OMSCursorConsistency ==\n    \\A p \\in Partitions :\n        /\\ oms_ce_cursor[p] >= 0\n        /\\ \\A m \\in Markets : oms_ob_cursor[p][m] >= 0\n        /\\ \\A m \\in Markets : oms_pending_cursor[p][m] >= 0",
+        "new": "OMSCursorConsistency ==\n    \\A p \\in Partitions :\n        /\\ \\A e \\in oms_log[p] : e.seq < oms_seq[p]\n        /\\ \\A e \\in oms_log[p] : e.session = oms_primary[p]\n        /\\ \\A e1, e2 \\in oms_log[p] : e1.seq = e2.seq => e1 = e2\n        /\\ oms_ce_cursor[p] >= 0\n        /\\ \\A m \\in Markets : oms_ob_cursor[p][m] >= 0\n        /\\ \\A m \\in Markets : oms_pending_cursor[p][m] >= 0"
+      }
+    ],
+    "new_conjuncts": {
+      "log_bounded": {
+        "formula": "\\A e \\in oms_log[p] : e.seq < oms_seq[p]",
+        "justification": "OMSConsumeCE (line 466): seq = oms_seq[p], then oms_seq' = oms_seq[p] + 1. So effect.seq = old oms_seq < new oms_seq. Same for OMSConsumeOB (line 482) and OMSConsumePending (line 499). OMSViewChange (line 523-524): oms_seq' = 1, oms_log' = {}. Empty log trivially satisfies e.seq < 1. OMSCrash/OMSRecover: oms_seq and oms_log UNCHANGED. No other action modifies oms_log or oms_seq.",
+        "mirrors": "INV9_CELogBounded (line 914-915), INV10_OBLogBounded (line 920-922)"
+      },
+      "session_consistency": {
+        "formula": "\\A e \\in oms_log[p] : e.session = oms_primary[p]",
+        "justification": "OMSConsumeCE (line 466): session = oms_primary[p], oms_primary UNCHANGED. OMSConsumeOB (line 482): session = oms_primary[p], oms_primary UNCHANGED. OMSConsumePending (line 499): session = oms_primary[p], oms_primary UNCHANGED. OMSViewChange (lines 520, 524): oms_primary' = new_session AND oms_log' = {}. Empty log trivially satisfies. OMSCrash/OMSRecover: both oms_primary and oms_log UNCHANGED. No action can create a log entry with a non-current session.",
+        "catches": "cross-session contamination: if a spec bug allowed old-session effects to survive OMSViewChange log reset, this conjunct would catch it"
+      },
+      "seq_uniqueness": {
+        "formula": "\\A e1, e2 \\in oms_log[p] : e1.seq = e2.seq => e1 = e2",
+        "justification": "Each consume action assigns seq = oms_seq[p] then increments oms_seq. Since oms_seq is monotonically increasing within a session (starts at 1, increments by 1 per consume), no two effects can share a seq value. OMSViewChange resets both seq and log together. TLA+ set semantics prevent exact duplicates, but this also catches two distinct records (different types) sharing a seq.",
+        "mirrors": "INV7_ArchiverDedup (lines 898-901) pattern applied to OMS log"
+      }
+    },
+    "unchanged_vars": "No UNCHANGED clauses affected. Only the invariant definition changes, no action modifications.",
+    "invariants_affected": {
+      "INV11_OMSCursorConsistency": "strengthened from vacuous to meaningful. Old conjuncts retained, three new conjuncts added.",
+      "AllInvariants": "no change needed, already references INV11_OMSCursorConsistency (line 1039)"
+    },
+    "liveness_argument": "N/A. This is a safety property change only. No fairness clauses or action enabledness affected.",
+    "properties_preserved": ["INV1 through INV20 unchanged", "all Fairness clauses unchanged"],
+    "state_space_impact": "zero: invariant-only change, no new state variables or action modifications"
+  }
+}

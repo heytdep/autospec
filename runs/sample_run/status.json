@@ -1,0 +1,48 @@
+{
+  "state": "running",
+  "current_step": 16,
+  "started": "2026-03-10T10:00:00Z",
+  "config": {
+    "P": 5,
+    "S": 3,
+    "F": 5,
+    "M": 3
+  },
+  "active_agents": [
+    {
+      "name": "autospec-proposer",
+      "role": "proposer",
+      "compartment": "C1",
+      "technique": "exploring registry",
+      "started": "2026-03-10T11:15:00Z"
+    },
+    {
+      "name": "autospec-proposer",
+      "role": "proposer",
+      "compartment": "C3",
+      "technique": "trust assumption exploitation",
+      "started": "2026-03-10T11:14:00Z"
+    },
+    {
+      "name": "autospec-novelty",
+      "role": "novelty verification",
+      "compartment": "C3",
+      "technique": "lazy view change propagation (T006)",
+      "started": "2026-03-10T11:10:00Z"
+    }
+  ],
+  "escalation": {
+    "C1": {
+      "consecutive_no_progress": 2,
+      "tier": 0
+    },
+    "C2": {
+      "consecutive_no_progress": 1,
+      "tier": 0
+    },
+    "C3": {
+      "consecutive_no_progress": 0,
+      "tier": 0
+    }
+  }
+}

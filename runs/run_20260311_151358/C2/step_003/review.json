@@ -1,0 +1,62 @@
+{
+  "step": 3,
+  "compartment": "C2",
+  "technique": "D205",
+  "verdict": "accept",
+  "confidence": 0.93,
+  "summary": "Proposal correctly identifies a genuine session-epoch stranding bug in OBViewChange. Both the broadcast path (OMSConsumeOB) and the archiver recovery path (OMSViewChange) are blocked after OB view change because both filter by ob_primary[m] which is the new session, while all existing effects carry the old session. The fix (re-tag + re-broadcast) is minimal and preserves all listed properties.",
+  "trace_verification": {
+    "status": "confirmed",
+    "detail": [
+      "OBViewChange (line 428-453): ob_primary incremented to new_session (line 437), ob_log pruned to {e in @ : e.seq <= recovered} but session tags unchanged (line 439), msgs_ob_broadcast UNCHANGED (line 452). Confirmed.",
+      "OMSConsumeOB (line 475-488): guard eff.session = ob_primary[m] (line 480). After OB VC, ob_primary[m] = new_session. Old broadcast effects have old session. No match possible. Confirmed.",
+      "DownstreamOMSReceiveOBViewChange (line 604-620): rolls back oms_ob_cursor[p][m] to MinOfTwo(current, vc.last_recovered) (line 613). This makes OMS expect effects from cursor+1 to last_recovered. But those effects only exist with old session in broadcast. Confirmed.",
+      "OMSViewChange archiver path (line 510-539): calls OBArchiverSeqsForSession(m, ob_primary[m]) (line 518). ob_primary[m] is new_session. ArchiverIngestOB (line 652-662) ingests from msgs_ob_broadcast with whatever session tag the effect carries. Since OB broadcast was UNCHANGED in OBViewChange, archivers only have old-session effects. Query with new session returns empty. Confirmed.",
+      "Both consumption paths are dead. OMS is permanently stuck for market m after OB view change."
+    ]
+  },
+  "gap_assessment": {
+    "is_real": true,
+    "severity_accurate": true,
+    "explanation": "This is a liveness failure, not a safety violation. No existing safety property catches it because P3/P10/P13 all hold (the log is valid, just inaccessible). The proposal correctly notes that no existing property detects this gap. A liveness property like 'OMS eventually catches up to OB recovery watermark' would expose it."
+  },
+  "fix_assessment": {
+    "correctness": "sound",
+    "detail": [
+      "Re-tagging recovered effects with new_session in ob_log is correct. After view change, the old session is defunct; the new session inherits the recovered prefix as canonical. No seq collision is possible because ob_seq starts at recovered+1, and all re-tagged effects have seq <= recovered.",
+      "Re-broadcasting recovered_effs to msgs_ob_broadcast[m] makes them available to both OMSConsumeOB (direct path) and ArchiverIngestOB (archiver path, enabling OMSViewChange catch-up).",
+      "Removing msgs_ob_broadcast from UNCHANGED is necessary and correctly done."
+    ],
+    "risks": [
+      "Minor: the re-broadcast adds effects to msgs_ob_broadcast that may duplicate old-session effects already there. OMSConsumeOB filters by session so old copies are harmless. ArchiverIngestOB may ingest both old and new session copies, but archiver dedup by (seq, session, market) means new-session copies are distinct entries. This is fine, archivers are append-only stores.",
+      "Minor: if OB view change happens with recovered=0 (nothing recoverable), recovered_effs is empty set. Re-tagging and re-broadcasting empty set is a no-op. Safe."
+    ]
+  },
+  "property_preservation_audit": {
+    "P1_TypeInvariant": "Agreed. EXCEPT on session field yields a Nat. Record structure preserved.",
+    "P3_OBSequenceMonotonic": "Agreed. Re-tagged effects inherit seq uniqueness from pre-VC log (which satisfied P3). No new-session effect with seq <= recovered can exist since ob_seq starts at recovered+1.",
+    "P5_OBNamespaceSeparation": "Agreed. Type field untouched by EXCEPT on session. PendingFill exclusion preserved.",
+    "P10_OBLogBounded": "Agreed. All re-tagged effects have seq <= recovered, ob_seq = recovered+1, so seq < ob_seq holds.",
+    "P13_OBBackupAppliedValid": "Agreed. ob_backup_applied cleared to empty set. Vacuously true.",
+    "P14_OBIndependenceFromCE": "Agreed. No CE variables touched.",
+    "P15_CEPendingRecoveryBounded": "Agreed. ob_pending_seq reset. Unrelated."
+  },
+  "counterarguments_considered": [
+    {
+      "argument": "Maybe the design intends OMS to crash and fully rebuild via OMSViewChange after OB VC, bypassing the broadcast path entirely",
+      "rebuttal": "Even OMSViewChange is blocked. It queries OBArchiverSeqsForSession(m, ob_primary[m]) which uses the new session. Archivers have no new-session effects (broadcast was unchanged, so ArchiverIngestOB only saw old session). OMSViewChange recovers nothing for this market. Both paths are dead."
+    },
+    {
+      "argument": "Maybe msgs_ob_broadcast is a set that grows monotonically and old effects are never lost, so OMS could relax the session filter",
+      "rebuttal": "LoseOBBroadcast (line 745-751) can remove messages from msgs_ob_broadcast. The channel is not monotonic. Even if it were, the session guard in OMSConsumeOB is structural (line 480), not a bug. Relaxing it would break epoch isolation."
+    },
+    {
+      "argument": "The fix introduces a brief window where ob_log has new-session effects but archivers might still serve old-session copies, causing archiver queries to return stale results",
+      "rebuttal": "Archiver queries in OMSViewChange use ob_primary[m] (new session). The re-broadcast adds new-session effects to msgs_ob_broadcast, which ArchiverIngestOB can pick up. Until archivers ingest these, OMSViewChange may get partial results, but MaxContiguousFrom handles partial availability gracefully (returns the max contiguous prefix). This is consistent with the existing eventual-consistency archiver model."
+    }
+  ],
+  "diff_accuracy": {
+    "status": "verified",
+    "notes": "Diff correctly targets OBViewChange. Line numbers match. LET binding for recovered_effs is well-placed. UNCHANGED clause correctly removes msgs_ob_broadcast. The set comprehension {[e EXCEPT !.session = new_session] : e in {x in ob_log[m] : x.seq <= recovered}} is valid TLA+ syntax."
+  }
+}

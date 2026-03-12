@@ -1,0 +1,95 @@
+{
+  "compartment": "C2",
+  "step": 1,
+  "status": "OK",
+  "failure_reason": null,
+  "hard_gate": {
+    "ran": false,
+    "passed": null,
+    "verifier": "TLC",
+    "note": "TLC unavailable - no Java runtime. Hard gate skipped."
+  },
+  "structural_verification": {
+    "ran": true,
+    "claim_substantiated": true,
+    "evidence": "Original anchor=0 when backup empty (line 431), modified anchor=ob_checkpoint_seq[m] (line 446). MinOfTwo cap at line 457 prevents cross-session staleness."
+  },
+  "technique_registry_update": {
+    "action": "updated",
+    "technique_id": "D201"
+  },
+  "proposal": {
+    "technique": "D201",
+    "technique_name": "surgical rollback via per-action nonces (anchor improvement)",
+    "target_actions": ["OBViewChange"],
+    "claim": "After adding ob_checkpoint_seq with a MinOfTwo cap in OBViewChange, the recovery anchor never falls below the checkpoint (bounding recovery scope) AND never exceeds the recovered watermark (preventing cross-session staleness). The double-crash scenario is safe: ob_checkpoint_seq is capped to recovered on every view change, so a stale checkpoint from session N cannot create sequence gaps in session N+2.",
+    "preconditions": "OBViewChange computes anchor as MaxOfSet(ob_backup_applied[m]) or 0. CE has a parallel two-tier anchor (backup_applied or ce_checkpoint_seq). OB lacks this fallback, creating an asymmetry where OB recovery degrades to full-log reconstruction when backup state is empty. OB runs in TEE (crash-only faults), so checkpoint integrity is guaranteed.",
+    "structural_delta": "recovery_scope dimension improves: BEFORE anchor = max(ob_backup_applied[m]) or 0, worst case reconstructs entire log from seq 1. AFTER anchor = max(ob_backup_applied[m]) or ob_checkpoint_seq[m], worst case reconstructs only post-checkpoint tail. ob_checkpoint_seq is capped at MinOfTwo(ob_checkpoint_seq[m], recovered) on every view change, preventing cross-session staleness. Adds 1 variable (ob_checkpoint_seq), 1 action (OBCheckpoint), modifies 1 action (OBViewChange anchor + checkpoint cap).",
+    "rationale": "CE has a two-tier anchor in CEViewChange: if backup is alive and has applied effects, use MaxOfSet(ce_backup_applied); otherwise fall back to ce_checkpoint_seq. OB's OBViewChange has only one tier: MaxOfSet(ob_backup_applied[m]) or 0. When backup has applied nothing, the anchor drops to 0, forcing full log reconstruction from seq 1. With a checkpoint fallback at ob_checkpoint_seq[m], the anchor never drops below the last checkpoint, bounding recovery to the tail.\n\nREVISION (round 1): The original proposal preserved ob_checkpoint_seq via UNCHANGED in OBViewChange, which caused cross-session staleness. If session N sets ob_checkpoint_seq=9, but view change only recovers to seq 8, then ob_checkpoint_seq stays at 9. If session N+1 crashes before checkpointing, the stale checkpoint=9 becomes the anchor, but archivers have nothing for session N+1, so recovered=MaxContiguousFrom(10,{})=9 and ob_seq=10. The log has no seq 9 entry, creating a permanent gap that stalls downstream OMS.\n\nFix: OBViewChange now sets ob_checkpoint_seq'=[ob_checkpoint_seq EXCEPT ![m] = MinOfTwo(@, recovered)]. This caps the checkpoint at the recovered watermark on every view change. When recovered < checkpoint_seq (archivers lost data or session was short), the checkpoint gets pulled back. When recovered >= checkpoint_seq, the checkpoint stays. This ensures the invariant: after OBViewChange, ob_checkpoint_seq[m] <= recovered = ob_seq[m]-1."
+  },
+  "review": {
+    "verdict": "APPROVE",
+    "precondition_check": {
+      "valid": true,
+      "issues": []
+    },
+    "claim_analysis": {
+      "falsified": false,
+      "counterexample": null,
+      "partial_issues": [
+        "The claim states 'ob_checkpoint_seq[m] <= recovered = ob_seq[m]-1' as a post-condition invariant. This holds because MinOfTwo(@, recovered) produces min(old_checkpoint, recovered), and recovered = ob_seq'-1 by construction. Verified through double-crash, triple-crash, and fresh-start scenarios."
+      ]
+    },
+    "property_preservation": {
+      "safe": true,
+      "concerns": [
+        "P1 (TypeInvariant): ob_checkpoint_seq[m] \\in 0..MaxSeq added to TypeInvariant. MinOfTwo of two values in 0..MaxSeq stays in 0..MaxSeq. Init sets 0. OBCheckpoint sets ob_seq[m]-1 which is in 0..MaxSeq since ob_seq[m] > 1 (guard) and ob_seq[m] <= MaxSeq+1 (TypeInvariant). Safe.",
+        "P3 (OBSequenceMonotonic): No seq assignment changed for production actions. OBViewChange sets ob_seq = recovered+1, same structure as before. The anchor change only affects the recovered value, which is still computed via MaxContiguousFrom on contiguous archiver data. No two effects in the same session can share a seq. Safe.",
+        "P10 (OBLogBounded): Log pruned to {e: e.seq <= recovered}, and ob_seq = recovered+1. All retained entries have seq <= recovered < recovered+1 = ob_seq. Safe.",
+        "P5 (OBNamespaceSeparation): OBCheckpoint touches only ob_checkpoint_seq. No type mixing introduced. Safe.",
+        "P13 (OBBackupAppliedValid): backup_applied cleared on view change, OBCheckpoint doesn't touch it. Safe.",
+        "P14 (OBIndependenceFromCE): ob_checkpoint_seq is purely OB-local, no CE dependency. Safe.",
+        "P15 (CEPendingRecoveryBounded): ob_pending_seq reset to 1 on view change, unaffected. Safe."
+      ]
+    },
+    "hidden_regressions": [
+      "MINOR (design-level, not spec-correctness): OBCheckpoint can set ob_checkpoint_seq to ob_seq[m]-1 before archivers have ingested that seq. However, this is not a spec bug because: (a) the local ob_log persists across OBCrash (UNCHANGED ob_log), so entries below checkpoint survive in the log even without archiver backup, and (b) the MinOfTwo cap in OBViewChange ensures checkpoint never exceeds recovered, which is derived from actual archiver availability. The checkpoint is therefore a safe local hint, not an archiver-side contract.",
+      "MINOR: OBCheckpoint can fire multiple times per session, each time overwriting the checkpoint to ob_seq[m]-1. This is monotonically non-decreasing within a session (since ob_seq only increases), so repeated checkpointing is safe. No idempotency issue."
+    ],
+    "diff_correctness": {
+      "valid": true,
+      "issues": [
+        "Verified: ob_checkpoint_seq added to obVars tuple. All actions using UNCHANGED <<...obVars...>> automatically cover it (OBBackupApply, all non-OB actions). Actions that enumerate individual ob_ variables (OBProduceEffect, OBProducePendingAction, OBReceiveMFR) have ob_checkpoint_seq added to their UNCHANGED. OBCrash adds ob_checkpoint_seq to UNCHANGED (checkpoint persists across crash, which is correct since the cap happens in OBViewChange). OBCheckpoint modifies it. OBViewChange caps it via MinOfTwo. All accounted for.",
+        "Verified: OBCheckpoint appears in Next under the \\E m \\in Markets quantifier.",
+        "Verified: Init sets ob_checkpoint_seq = [m \\in Markets |-> 0].",
+        "Verified: TypeInvariant includes ob_checkpoint_seq[m] \\in 0..MaxSeq.",
+        "Verified: The @ reference in [ob_checkpoint_seq EXCEPT ![m] = MinOfTwo(@, recovered)] correctly refers to ob_checkpoint_seq[m] in TLA+ EXCEPT syntax."
+      ]
+    },
+    "summary": "The revision correctly fixes the cross-session staleness bug identified in the original review. The MinOfTwo(ob_checkpoint_seq[m], recovered) cap in OBViewChange ensures the checkpoint never exceeds the recovered watermark, preventing the sequence gap that would strand downstream OMS consumers. Traced through double-crash, triple-crash, fresh-start, and archiver-lag scenarios; all produce stable, gap-free recovery. The local ob_log persistence across OBCrash (UNCHANGED ob_log) is the key enabler: even when archivers lag behind the checkpoint, the log retains the entries locally, and MaxContiguousFrom correctly computes recovery from actual archiver availability. All UNCHANGED clauses are correct, OBCheckpoint is properly guarded and appears in Next, and all seven local/spanning properties are preserved."
+  },
+  "judgment": {
+    "ruling": "ACCEPT",
+    "reasoning": "The MinOfTwo cap in OBViewChange correctly resolves the cross-session staleness bug and makes the double-crash scenario safe. Verified by tracing the execution path against the actual spec.\n\nCore invariant established by the fix: after any OBViewChange, ob_checkpoint_seq[m] <= recovered = ob_seq[m] - 1. Holds because MinOfTwo(@, recovered) returns min(old_ckpt, recovered), and recovered is by construction the largest contiguous sequence reachable from anchor+1 in the available archiver seqs.\n\nDouble-crash trace with fix applied:\n- Session N ends. ob_checkpoint_seq[m] = C (advanced during session N via OBCheckpoint).\n- Crash 1, OBViewChange: anchor = C (checkpoint fallback, since ob_backup_applied = {}). available = OBArchiverSeqsForSession(m, N). recovered = MaxContiguousFrom(C+1, available). ob_checkpoint_seq' = min(C, recovered). If archivers lag and recovered < C, checkpoint is pulled back. ob_seq' = recovered+1. Let R1 = recovered, ckpt1 = min(C, R1).\n- Session N+1: no effects produced, no OBCheckpoint fires. ob_checkpoint_seq persists through OBCrash (UNCHANGED in OBCrash).\n- Crash 2, OBViewChange: anchor = ob_checkpoint_seq = ckpt1. available = OBArchiverSeqsForSession(m, N+1) = {} (no effects in session N+1). recovered = MaxContiguousFrom(ckpt1+1, {}) = ckpt1. ob_seq' = ckpt1+1. ob_checkpoint_seq' = min(ckpt1, ckpt1) = ckpt1.\n- ob_log pruned to {e : e.seq <= ckpt1}. ob_seq = ckpt1+1. No gap. OMS can consume contiguously.\n\nContrast with original bug (without cap): session N sets checkpoint=9, crash 1 recovers to seq 8, checkpoint stays 9. Crash 2: anchor=9, available={}, recovered=MaxContiguousFrom(10,{})=9, ob_seq=10. Log was pruned to seq 8 at crash 1. Seq 9 absent from log and archivers. OMS stalls permanently.\n\nWith cap: crash 1 sets ob_checkpoint_seq=min(9,8)=8. Crash 2: anchor=8, recovered=8, ob_seq=9, log has entries through seq 8. Gap-free.",
+    "proposer_claim_assessment": "Correct. The claim that ob_checkpoint_seq[m] <= recovered = ob_seq[m]-1 holds as a post-OBViewChange invariant is verified by tracing the spec. The cross-session staleness scenario described in the revision rationale accurately captures the failure mode and the fix is precisely targeted. The structural delta (1 variable ob_checkpoint_seq, 1 new action OBCheckpoint, 1 modified action OBViewChange) matches the diff. The precondition asymmetry between CEViewChange (two-tier anchor at lines 301-303) and OBViewChange (single-tier falling to 0 at lines 431-433 in the base spec) is correctly identified and present.",
+    "reviewer_objections_assessment": [
+      {
+        "objection": "Original review: ob_checkpoint_seq preserved via UNCHANGED in OBViewChange causes cross-session staleness, producing permanent sequence gap in double-crash scenario.",
+        "resolution": "Resolved by revision. MinOfTwo(@, recovered) in OBViewChange caps the checkpoint at the actual recovered watermark on every view change. Stale checkpoints from any prior session cannot survive into subsequent sessions as an over-estimated anchor.",
+        "status": "resolved"
+      },
+      {
+        "objection": "Reviewer MINOR: OBCheckpoint may fire before archivers have ingested ob_seq[m]-1, making checkpoint a locally-held value that exceeds archiver coverage.",
+        "resolution": "Not a correctness issue. ob_log persists through OBCrash (UNCHANGED ob_log in OBCrash at spec lines 419-424). Entries below checkpoint that archivers have not yet ingested remain in the local log. MaxContiguousFrom then computes recovery from actual archiver availability, and MinOfTwo pulls the checkpoint back if archivers lag. The checkpoint is correctly a recovery hint, not an archiver-side durability contract. Consistent with domain invariant 5 (archivers are non-TEE, fire-and-forget).",
+        "status": "acknowledged, non-blocking"
+      },
+      {
+        "objection": "Reviewer MINOR: OBCheckpoint can fire multiple times per session, each time overwriting to ob_seq[m]-1.",
+        "resolution": "Safe. ob_seq is monotonically non-decreasing within a session (only incremented, never decremented by any production action). Repeated OBCheckpoint calls produce a non-decreasing checkpoint sequence within the session. No idempotency issue.",
+        "status": "acknowledged, non-blocking"
+      }
+    ],
+    "property_essence_risk": "Low. All seven properties are preserved. P3 (OBSequenceMonotonic): OBViewChange sets ob_seq = recovered+1 where recovered is MaxContiguousFrom result, same structure as before. Anchor change only shifts the starting point of the contiguous scan, not the scan logic. P10 (OBLogBounded): log pruned to {e : e.seq <= recovered}, ob_seq = recovered+1, so all entries have seq < ob_seq. P5 (OBNamespaceSeparation): OBCheckpoint touches only ob_checkpoint_seq, no type mixing. P13 (OBBackupAppliedValid): ob_backup_applied cleared on view change, OBCheckpoint does not touch it. P14 (OBIndependenceFromCE): ob_checkpoint_seq is purely OB-local. P1 (TypeInvariant): MinOfTwo of two values in 0..MaxSeq stays in 0..MaxSeq; OBCheckpoint guard (ob_seq[m] > 1) ensures ob_seq[m]-1 >= 1, init sets 0. P15 (CEPendingRecoveryBounded): ob_pending_seq reset to 1 on view change, unaffected.",
+    "notes_for_journal": "The fix pattern (cap checkpoint at recovered on every view change) mirrors the CE discipline but is implemented differently. CEViewChange leaves ce_checkpoint_seq UNCHANGED (safe because CECheckpoint only fires when ce_alive, which cannot overlap with CEViewChange, so the checkpoint is already bounded by the live session). OB's structure is different: OBCheckpoint advances the checkpoint ahead of what archivers hold, so the cap must occur reactively at view change time. This asymmetry was the subtle error in the original proposal. The revision correctly identifies the one-line fix and the resulting invariant. ACCEPT is warranted: the fix is minimal, targeted, and verified through the failure scenario."
+  }
+}

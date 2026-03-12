@@ -1,0 +1,49 @@
+{
+  "run_id": "sample_run",
+  "step": 11,
+  "compartment": "C2",
+  "timestamp": "2026-03-10T10:50:00Z",
+  "status": "OK",
+  "proposal": {
+    "technique": "T002",
+    "technique_name": "round collapsing",
+    "target_actions": [
+      "AppendEntry",
+      "ReplicateEntry"
+    ],
+    "claim": "pipeline append+replicate: leader replicates entry while appending next",
+    "structural_delta": "latency: pipelined replication, 2 -> 1 effective round in steady state",
+    "diff": "--- a/log_replication.tla\n+++ b/log_replication.tla\n-AppendEntry(leader, entry) == ...\n-ReplicateEntry(leader, replica, entry) == ...\n+AppendAndReplicate(leader, entry) ==\n+  /\\ log' = [log EXCEPT ![leader] = Append(log[leader], entry)]\n+  /\\ Send to all replicas"
+  },
+  "review": {
+    "verdict": "APPROVE",
+    "argument": "replication depends on entry content, not full post-append state"
+  },
+  "judgment": {
+    "ruling": "ACCEPT",
+    "reasoning": "confirmed: safe to pipeline"
+  },
+  "hard_gate": {
+    "ran": true,
+    "passed": true,
+    "verifier": "TLC",
+    "state_space_before": 41200,
+    "state_space_after": 35800,
+    "properties_checked": [
+      "LogMatching",
+      "LeaderCompleteness",
+      "StateMachineSafety"
+    ],
+    "counterexample": null
+  },
+  "structural_verification": {
+    "ran": true,
+    "claim_substantiated": true,
+    "evidence": "append+replicate merged, one fewer sequential round"
+  },
+  "failure_reason": null,
+  "technique_registry_update": {
+    "action": "updated",
+    "technique_id": "T002"
+  }
+}

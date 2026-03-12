@@ -1,0 +1,60 @@
+{
+  "step": 5,
+  "compartment": "C3",
+  "verdict": "accept",
+  "confidence": 0.93,
+  "summary": "Proposal correctly identifies P11 as vacuous and proposes three meaningful replacement conjuncts. All three are verified sound against the spec. Minor naming issue flagged.",
+  "vacuity_confirmed": true,
+  "vacuity_reasoning": "oms_ce_cursor initialized to 0 (line 175-193), only modified by: increment (OMSConsumeCE line 469), MaxContiguousFrom output >= start-1 >= 0 (OMSViewChange line 525), MinOfTwo(current, vc.last_recovered) both >= 0 (DownstreamOMSReceiveCEViewChange line 595), reset to 0 not applicable. Same pattern for ob/pending cursors. >= 0 is structurally unreachable to violate on Nat-typed variables.",
+  "conjunct_verdicts": {
+    "log_bounded": {
+      "formula": "\\A e \\in oms_log[p] : e.seq < oms_seq[p]",
+      "verdict": "sound",
+      "trace": [
+        "Init (line 175-176): oms_seq = 1, oms_log = {}. Empty set, trivially true.",
+        "OMSConsumeCE (line 466-468): local_eff.seq = oms_seq[p], then oms_seq' = oms_seq[p]+1. New entry seq = old oms_seq < new oms_seq. Existing entries: seq < old oms_seq < new oms_seq. Sound.",
+        "OMSConsumeOB (line 482-484): identical pattern. Sound.",
+        "OMSConsumePending (line 499-501): identical pattern. Sound.",
+        "OMSViewChange (line 523-524): oms_seq' = 1, oms_log' = {}. Empty log, trivially true.",
+        "OMSCrash/OMSRecover (line 553-568): both oms_seq and oms_log UNCHANGED.",
+        "DownstreamOMSReceiveCEViewChange (line 598): oms_seq and oms_log UNCHANGED.",
+        "DownstreamOMSReceiveOBViewChange (line 618): oms_seq and oms_log UNCHANGED.",
+        "ArchiverIngestOMS (line 682-684): reads oms_log but does not modify it. oms_seq UNCHANGED."
+      ]
+    },
+    "session_consistency": {
+      "formula": "\\A e \\in oms_log[p] : e.session = oms_primary[p]",
+      "verdict": "sound",
+      "trace": [
+        "Only OMSViewChange modifies oms_primary (line 520). It simultaneously sets oms_log' = {} (line 524). Empty log trivially satisfies.",
+        "All three consume actions (lines 466, 482, 499) set session = oms_primary[p] and do not modify oms_primary (it appears in UNCHANGED for all three).",
+        "No other action modifies oms_primary. Confirmed: single grep for oms_primary' yields only line 520."
+      ]
+    },
+    "seq_uniqueness": {
+      "formula": "\\A e1, e2 \\in oms_log[p] : e1.seq = e2.seq => e1 = e2",
+      "verdict": "sound",
+      "trace": [
+        "Each consume action assigns seq = oms_seq[p] then increments oms_seq. Since oms_seq starts at 1 (Init) or 1 (OMSViewChange), and increments by 1 per consume, each effect gets a unique seq within a session.",
+        "OMSViewChange resets both oms_seq to 1 and oms_log to {}. No stale entries can collide with new session entries.",
+        "TLA+ set union prevents exact duplicates, but two records with same seq but different type fields would violate this. The monotonic oms_seq counter prevents that."
+      ],
+      "note": "Formula is stronger than INV7 (ArchiverDedup) which conditions on both seq and session. Here session condition is redundant because session_consistency already constrains all log entries to share the same session. Not incorrect, but stylistically diverges from INV7 pattern."
+    }
+  },
+  "issues": [
+    {
+      "severity": "low",
+      "type": "naming",
+      "description": "INV11 is named OMSCursorConsistency but the three new conjuncts are log-structural properties (bounded, session-consistent, unique). The old cursor >= 0 checks are retained but are no longer the primary content. Name should reflect the strengthened scope, e.g. OMSLogAndCursorConsistency or OMSStructuralConsistency. Not blocking since rename is cosmetic and can be done in a later step."
+    }
+  ],
+  "state_space_impact": "zero. Invariant-only change, no new variables or action modifications. TLC checking cost increases slightly due to quantification over oms_log elements, but oms_log is already bounded by MaxSeq.",
+  "properties_interaction": {
+    "P1_TypeInvariant": "no conflict. TypeInvariant constrains oms_log element types and seq ranges. New conjuncts are strictly tighter.",
+    "P8_OMSDerivedState": "complementary. P8 constrains effect types, new P11 constrains seq bounds and session identity.",
+    "P9_CELogBounded": "mirrored pattern. New log_bounded conjunct applies same e.seq < counter pattern to OMS.",
+    "P10_OBLogBounded": "mirrored pattern. Same as P9.",
+    "other_C3_properties": "P7, P8 unchanged. P1, P6, P15-P19 unchanged. No interaction."
+  }
+}

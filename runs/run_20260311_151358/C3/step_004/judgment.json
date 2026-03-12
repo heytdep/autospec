@@ -1,0 +1,25 @@
+{
+  "step": 4,
+  "compartment": "C3",
+  "technique": "D208",
+  "ruling": "accept",
+  "confidence": 0.88,
+  "severity": "medium",
+  "rationale": {
+    "bug_real": true,
+    "bug_summary": "OMSConsumeCE, OMSConsumeOB, and OMSConsumePending lack ~oms_muted guard. After OMSRecover sets muted=TRUE, all three actions remain enabled and can advance cursors and write to oms_log. OMSViewChange subsequently wipes oms_log and recomputes catch-up from the already-advanced cursor, permanently losing any consumed effects that ArchiverIngestOMS had not yet ingested.",
+    "reviewer_objection_assessed": "Reviewer correctly notes the proposal slightly overstates severity by claiming a property violation when no explicit OMS archival completeness invariant exists in the spec. This is accurate. The consequence is semantic incorrectness and a potential archiver gap, not a violation of any numbered invariant. Severity is medium.",
+    "fix_correctness": "The fix is minimal and correct. Adding ~oms_muted[p] as a precondition guard to all three consumption actions blocks consumption during the recovery window. OMSViewChange is the designed catch-up path during muted periods and does not write to oms_log. No liveness risk: WF on OMSUnmute and archiver ingest actions ensures the muted period terminates and consumption resumes.",
+    "liveness_preserved": true,
+    "state_space_impact": "reduces: three actions disabled during muted period, fewer interleaving states during recovery",
+    "properties_violated_by_bug": "none specified. Semantic bug only.",
+    "properties_affected_by_fix": "none. Fix is purely additive precondition. INV18, INV11, INV8 unaffected per both proposer and reviewer analysis."
+  },
+  "dispositive_points": [
+    "The trace is valid and confirmed by reviewer: OMSRecover at line 562-568 sets alive=TRUE, muted=TRUE with cursors unchanged. Consumption then fires on alive check alone.",
+    "OMSViewChange cursor computation at line 516 uses the post-consumption cursor as its starting offset, meaning effects consumed-but-wiped are unreachable in the new session.",
+    "WF(ArchiverIngestOMS) guarantees eventual ingestion but not immediate ingestion, so the race window is reachable in any finite model.",
+    "No dispositive conflict between proposal and review. Reviewer accepts the fix, objects only to severity framing. Severity framing does not affect correctness of the fix."
+  ],
+  "verdict_note": "Reviewer's overstatement objection is noted but does not change the ruling. The fix is correct regardless of whether a formal invariant captures the consequence. Muted OMS should not consume; the spec should enforce this."
+}

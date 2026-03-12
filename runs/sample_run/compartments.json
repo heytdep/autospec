@@ -1,0 +1,103 @@
+{
+  "mode": "multi-compartment",
+  "compartments": [
+    {
+      "id": "C1",
+      "name": "leader_election",
+      "actions": [
+        "ElectLeader",
+        "HandleVote",
+        "DeclareLeader",
+        "TimeoutElection"
+      ],
+      "local_vars": [
+        "votes",
+        "leader",
+        "election_round",
+        "candidates"
+      ],
+      "local_properties": [
+        "LeaderUniqueness",
+        "ElectionTermination"
+      ],
+      "rationale": "closed loop over election state, only leader var read externally"
+    },
+    {
+      "id": "C2",
+      "name": "log_replication",
+      "actions": [
+        "AppendEntry",
+        "ReplicateEntry",
+        "AckEntry",
+        "CommitEntry",
+        "TruncateLog"
+      ],
+      "local_vars": [
+        "log",
+        "commit_index",
+        "match_index",
+        "next_index"
+      ],
+      "local_properties": [
+        "LogMatching",
+        "LeaderCompleteness",
+        "StateMachineSafety"
+      ],
+      "rationale": "core replication logic, reads leader from C1, log shared with C3 for view change"
+    },
+    {
+      "id": "C3",
+      "name": "view_change",
+      "actions": [
+        "InitiateViewChange",
+        "CollectViewChangeMessages",
+        "InstallNewView",
+        "RollbackActions"
+      ],
+      "local_vars": [
+        "view_number",
+        "vc_messages",
+        "new_view_proof",
+        "rollback_set"
+      ],
+      "local_properties": [
+        "ViewMonotonicity",
+        "RollbackSafety"
+      ],
+      "rationale": "view change protocol, reads log from C2 for rollback decisions"
+    }
+  ],
+  "intersections": [
+    {
+      "id": "I1",
+      "compartments": [
+        "C1",
+        "C2"
+      ],
+      "shared_vars": [
+        "leader"
+      ],
+      "directionality": "C1 writes, C2 reads",
+      "spanning_properties": [
+        "LeaderConsistency"
+      ],
+      "coupling_strength": "medium"
+    },
+    {
+      "id": "I2",
+      "compartments": [
+        "C2",
+        "C3"
+      ],
+      "shared_vars": [
+        "log"
+      ],
+      "directionality": "bidirectional",
+      "spanning_properties": [
+        "ViewChangeLogIntegrity"
+      ],
+      "coupling_strength": "strong"
+    }
+  ],
+  "topology_summary": "3 compartments, 2 intersections, linear chain C1-C2-C3, one strong coupling (C2-C3)"
+}

@@ -1,0 +1,51 @@
+{
+  "step": 4,
+  "compartment": "C3",
+  "technique": "D208",
+  "technique_name": "reactive constraint enforcement on state change",
+  "target_actions": ["OMSConsumeCE", "OMSConsumeOB", "OMSConsumePending"],
+  "claim": "OMS consumption actions lack ~oms_muted guard, allowing cursor advancement while muted; OMSViewChange then wipes oms_log, losing effects that archivers may not have ingested yet, breaking OMS archival completeness",
+  "problem": {
+    "description": "OMSConsumeCE (line 461), OMSConsumeOB (line 476), and OMSConsumePending (line 493) check oms_alive[p] but NOT ~oms_muted[p]. After OMSRecover sets muted=TRUE, OMS can still consume effects, advancing cursors and appending to oms_log. When OMSViewChange subsequently fires, it resets oms_seq=1 and clears oms_log={}. Any effects consumed while muted that the OMS archiver has not yet ingested (ArchiverIngestOMS is WF but not instantaneous) are permanently lost from the archival path. The cursor has advanced past them, so they will never be re-consumed in the new session.",
+    "trace": [
+      "OMSCrash(p): alive=FALSE",
+      "OMSRecover(p): alive=TRUE, muted=TRUE",
+      "OMSConsumeCE(p): enabled because oms_alive[p]=TRUE, no muted check. Appends to oms_log, advances oms_ce_cursor.",
+      "(ArchiverIngestOMS has not yet fired for this effect)",
+      "OMSViewChange(p): oms_log'={}, oms_seq'=1. ce_caught_up = MaxContiguousFrom(oms_ce_cursor[p]+1, ...) starts from already-advanced cursor. Effect consumed in step 3 is gone from log, never archived, cursor past it."
+    ],
+    "consequence": "OMS archiver store has a gap for the lost effect. OMS archival completeness is violated. Downstream consumers reading from OMS archivers see a non-contiguous effect history."
+  },
+  "fix": {
+    "description": "Add ~oms_muted[p] guard to all three OMS consumption actions. This ensures OMS only consumes effects when in a valid unmuted state. Catch-up during muted period happens exclusively through OMSViewChange's archiver-based cursor advancement, which does not write to oms_log (it only adjusts cursors). Liveness is preserved: WF(ArchiverIngest*) ensures archivers have effects, OMSViewChange catches up cursors from archivers, OMSUnmute fires when caught up.",
+    "diff": [
+      {
+        "action": "OMSConsumeCE",
+        "location": "line 461",
+        "old": "    /\\ oms_alive[p]\n    /\\ oms_seq[p] <= MaxSeq",
+        "new": "    /\\ oms_alive[p]\n    /\\ ~oms_muted[p]\n    /\\ oms_seq[p] <= MaxSeq"
+      },
+      {
+        "action": "OMSConsumeOB",
+        "location": "line 476",
+        "old": "    /\\ oms_alive[p]\n    /\\ oms_seq[p] <= MaxSeq",
+        "new": "    /\\ oms_alive[p]\n    /\\ ~oms_muted[p]\n    /\\ oms_seq[p] <= MaxSeq"
+      },
+      {
+        "action": "OMSConsumePending",
+        "location": "line 493",
+        "old": "    /\\ oms_alive[p]\n    /\\ oms_seq[p] <= MaxSeq",
+        "new": "    /\\ oms_alive[p]\n    /\\ ~oms_muted[p]\n    /\\ oms_seq[p] <= MaxSeq"
+      }
+    ],
+    "unchanged_vars": "No UNCHANGED clauses affected. Only precondition guards added.",
+    "invariants_affected": {
+      "INV18_OMSMutedUntilCaughtUp": "still holds: unmuted OMS has caught-up cursors. fix only restricts when consumption can happen, does not change cursor values at unmute time.",
+      "INV11_OMSCursorConsistency": "still holds: cursors remain >= 0. Fix does not modify cursor update logic.",
+      "INV8_OMSDerivedState": "still holds: consumed effect types unchanged."
+    },
+    "liveness_argument": "OMSViewChange catches up cursors from archivers (ce_caught_up, ob_caught_up). WF on archiver ingest actions ensures effects reach archivers. WF on OMSUnmute ensures unmute fires when guards are satisfied. After unmute, consumption resumes with ~oms_muted[p] = TRUE. No new liveness obligations introduced.",
+    "properties_preserved": ["INV1 through INV20", "all Fairness clauses"],
+    "state_space_impact": "reduces state space: fewer enabled actions when OMS is muted"
+  }
+}

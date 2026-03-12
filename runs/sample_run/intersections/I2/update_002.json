@@ -1,0 +1,10 @@
+{
+  "step": 11,
+  "source_compartment": "C2",
+  "type": "action_merge",
+  "description": "append+replicate pipelined, log write pattern unchanged",
+  "affected_vars": [
+    "log"
+  ],
+  "status": "committed"
+}

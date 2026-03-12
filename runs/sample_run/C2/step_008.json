@@ -1,0 +1,48 @@
+{
+  "run_id": "sample_run",
+  "step": 8,
+  "compartment": "C2",
+  "timestamp": "2026-03-10T10:35:00Z",
+  "status": "OK",
+  "proposal": {
+    "technique": "T004",
+    "technique_name": "redundant mechanism elimination",
+    "target_actions": [
+      "CommitEntry"
+    ],
+    "claim": "commit broadcast redundant: replicas infer commit from ack quorum + aggregate sig",
+    "structural_delta": "communication: remove one O(n) broadcast round per commit",
+    "diff": "--- a/log_replication.tla\n+++ b/log_replication.tla\n CommitEntry(leader, entry_id) ==\n   /\\ Cardinality(acks[entry_id]) * 2 > Cardinality(Replicas)\n   /\\ commit_index' = [commit_index EXCEPT ![leader] = entry_id]\n-  /\\ BroadcastCommit(leader, entry_id)"
+  },
+  "review": {
+    "verdict": "APPROVE",
+    "argument": "replicas can verify quorum from aggregate sig (step 3 synergy)"
+  },
+  "judgment": {
+    "ruling": "ACCEPT",
+    "reasoning": "synergy with aggregate sigs confirmed"
+  },
+  "hard_gate": {
+    "ran": true,
+    "passed": true,
+    "verifier": "TLC",
+    "state_space_before": 54120,
+    "state_space_after": 41200,
+    "properties_checked": [
+      "LogMatching",
+      "LeaderCompleteness",
+      "StateMachineSafety"
+    ],
+    "counterexample": null
+  },
+  "structural_verification": {
+    "ran": true,
+    "claim_substantiated": true,
+    "evidence": "BroadcastCommit removed, one fewer O(n) round"
+  },
+  "failure_reason": null,
+  "technique_registry_update": {
+    "action": "updated",
+    "technique_id": "T004"
+  }
+}

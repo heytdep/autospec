@@ -1,0 +1,71 @@
+{
+  "compartment": "C1",
+  "step": 4,
+  "status": "FAIL",
+  "failure_reason": "D206 session gate on CEProcessRecoveredPending rejected: (1) P15 explicitly anticipates old-session pending fills with session-mismatch escape clause, (2) CEProcessRecoveredPending never sends to msgs_ce_to_ob so phantom CEFinalization claim is false, (3) diff conflicts with step 3 accepted proposal.",
+  "hard_gate": {
+    "ran": false,
+    "passed": false
+  },
+  "structural_verification": {
+    "ran": false,
+    "claim_substantiated": false
+  },
+  "technique_registry_update": {
+    "action": "failure_recorded",
+    "technique_id": "D206"
+  },
+  "proposal": {
+    "technique": "D206",
+    "technique_name": "multi-source vector clocking with per-source cursors",
+    "target_actions": ["CEProcessRecoveredPending"],
+    "claim": "CEProcessRecoveredPending lacks OB session freshness gate, allowing processing of pending fills from rolled-back OB sessions. Adding session guard eliminates stale-session MFR production.",
+    "verdict": "REJECT",
+    "judge_confidence": 0.92,
+    "reviewer_confidence": 0.88
+  },
+  "review": {
+    "verdict": "REJECT",
+    "trace_validity": true,
+    "consequence_overstated": true,
+    "key_findings": [
+      "CEProcessRecoveredPending has msgs_ce_to_ob in UNCHANGED clause — no CEFinalization is ever produced for recovered pending fills",
+      "P15 escape clause 'pa.session /= ob_primary[pa.market]' is affirmative spec-design evidence that old-session fills are expected",
+      "No C1 property is violated by the described behavior",
+      "Diff conflicts with step 3 accepted proposal on CEProcessRecoveredPending (step 3 collapsed MFR+Snapshot to single MFR)"
+    ]
+  },
+  "judgment": {
+    "verdict": "REJECT",
+    "ruling": "Reviewer sustained. Proposal D206 rejected.",
+    "grounds": [
+      {
+        "id": "G1",
+        "weight": "dispositive",
+        "finding": "No C1 property is violated by the described behavior. All relevant properties checked: P2, P4, P6, P9, P12, P15, P16, P17, P18, P19."
+      },
+      {
+        "id": "G2",
+        "weight": "dispositive",
+        "finding": "P15 contains explicit disjunct 'pa.session /= ob_primary[pa.market]' as an escape clause — old-session pending fills are expected to persist and be processed."
+      },
+      {
+        "id": "G3",
+        "weight": "dispositive",
+        "finding": "Phantom CEFinalization consequence does not hold. CEProcessRecoveredPending has msgs_ce_to_ob in UNCHANGED clause — recovered pending fills never trigger CEFinalization."
+      },
+      {
+        "id": "G4",
+        "weight": "supporting",
+        "finding": "Diff conflicts with step 3 accepted proposal. Step 3 collapsed MFR+Snapshot to single MFR in CEProcessRecoveredPending. Both proposals cannot apply cleanly."
+      },
+      {
+        "id": "G5",
+        "weight": "supporting",
+        "finding": "Fix introduces liveness hazard: CEProcessRecoveredPending blocked on ce_cached_ob_session until CEReceiveOBViewChange fires, creating a message ordering dependency absent from the current spec."
+      }
+    ],
+    "spec_state": "unchanged",
+    "next_step_guidance": "Do not re-propose a session freshness gate on CEProcessRecoveredPending without first identifying a concrete C1 property violated by old-session fill processing. The P15 escape clause must be addressed."
+  }
+}

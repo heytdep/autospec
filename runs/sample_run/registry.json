@@ -1,0 +1,305 @@
+[
+  {
+    "id": "T001",
+    "name": "signature aggregation",
+    "class": "known",
+    "source": {
+      "type": "paper",
+      "ref": "Boneh et al. 2003"
+    },
+    "description": "replace individual signatures with aggregate signature",
+    "optimizes": [
+      "communication complexity",
+      "message size"
+    ],
+    "preconditions": [
+      "signature scheme supports aggregation",
+      "distinct signers"
+    ],
+    "generalized_form": "when n signatures needed, replace with 1 aggregate",
+    "applications": [
+      {
+        "run": "sample_run",
+        "step": 3,
+        "compartment": "C2",
+        "outcome": "OK",
+        "notes": "applied to AckEntry, reduced ack size from O(n) sigs to O(1)"
+      },
+      {
+        "run": "sample_run",
+        "step": 9,
+        "compartment": "C3",
+        "outcome": "OK",
+        "notes": "applied to view change proof messages"
+      }
+    ],
+    "known_failures": [],
+    "verification_trail": null
+  },
+  {
+    "id": "T002",
+    "name": "round collapsing",
+    "class": "known",
+    "source": {
+      "type": "paper",
+      "ref": "various consensus literature"
+    },
+    "description": "merge consecutive communication rounds when second doesn't depend on full first-round results",
+    "optimizes": [
+      "latency",
+      "round complexity"
+    ],
+    "preconditions": [
+      "consecutive rounds where R2 messages depend only on local R1 result"
+    ],
+    "generalized_form": "if R2 can begin before R1 completes, pipeline or merge",
+    "applications": [
+      {
+        "run": "sample_run",
+        "step": 5,
+        "compartment": "C1",
+        "outcome": "FAIL",
+        "notes": "election requires all votes before declaring"
+      },
+      {
+        "run": "sample_run",
+        "step": 11,
+        "compartment": "C2",
+        "outcome": "OK",
+        "notes": "pipelined append+replicate"
+      }
+    ],
+    "known_failures": [
+      {
+        "run": "sample_run",
+        "step": 5,
+        "compartment": "C1",
+        "reason": "precondition not met: DeclareLeader needs full vote count"
+      }
+    ],
+    "verification_trail": null
+  },
+  {
+    "id": "T003",
+    "name": "trust assumption exploitation (TEE)",
+    "class": "known",
+    "source": {
+      "type": "paper",
+      "ref": "TEE-based consensus literature"
+    },
+    "description": "remove protocol mechanisms redundant under TEE guarantees",
+    "optimizes": [
+      "protocol complexity",
+      "round count",
+      "message count"
+    ],
+    "preconditions": [
+      "TEE trust model provides equivalent guarantees"
+    ],
+    "generalized_form": "for each mechanism M, if TEE already excludes the threat M mitigates, remove M",
+    "applications": [
+      {
+        "run": "sample_run",
+        "step": 7,
+        "compartment": "C1",
+        "outcome": "OK",
+        "notes": "removed vote authentication round"
+      },
+      {
+        "run": "sample_run",
+        "step": 13,
+        "compartment": "C3",
+        "outcome": "OK",
+        "notes": "simplified view change proof"
+      }
+    ],
+    "known_failures": [],
+    "verification_trail": null
+  },
+  {
+    "id": "T004",
+    "name": "redundant mechanism elimination",
+    "class": "known",
+    "source": {
+      "type": "paper",
+      "ref": "standard formal methods practice"
+    },
+    "description": "remove mechanisms whose guarantees are subsumed by others",
+    "optimizes": [
+      "spec simplicity",
+      "protocol complexity"
+    ],
+    "preconditions": [
+      "another mechanism or trust assumption provides the same guarantee"
+    ],
+    "generalized_form": "if mechanism M guarantees property P and P is already guaranteed elsewhere, remove M",
+    "applications": [
+      {
+        "run": "sample_run",
+        "step": 2,
+        "compartment": "C2",
+        "outcome": "FAIL",
+        "notes": "tried to remove TruncateLog"
+      },
+      {
+        "run": "sample_run",
+        "step": 8,
+        "compartment": "C2",
+        "outcome": "OK",
+        "notes": "removed duplicate commit confirmation"
+      }
+    ],
+    "known_failures": [
+      {
+        "run": "sample_run",
+        "step": 2,
+        "compartment": "C2",
+        "reason": "TruncateLog not redundant, needed by C3 for surgical rollback"
+      }
+    ],
+    "verification_trail": null
+  },
+  {
+    "id": "T005",
+    "name": "state variable elimination",
+    "class": "known",
+    "source": {
+      "type": "paper",
+      "ref": "standard formal methods practice"
+    },
+    "description": "remove derived state variables, replace reads with derivation",
+    "optimizes": [
+      "state space size",
+      "spec simplicity"
+    ],
+    "preconditions": [
+      "variable is a function of other variables at all reachable states"
+    ],
+    "generalized_form": "if v = f(v1,...,vn) is invariant, eliminate v and inline f",
+    "applications": [
+      {
+        "run": "sample_run",
+        "step": 4,
+        "compartment": "C2",
+        "outcome": "OK",
+        "notes": "eliminated next_index, derivable from match_index + 1"
+      }
+    ],
+    "known_failures": [],
+    "verification_trail": null
+  },
+  {
+    "id": "T006",
+    "name": "lazy view change propagation",
+    "class": "candidate-novel",
+    "source": {
+      "type": "agent-discovered",
+      "ref": "sample_run/step_10/C3"
+    },
+    "description": "delay view change message propagation until new leader pulls on demand instead of eager broadcast",
+    "optimizes": [
+      "communication complexity during view change",
+      "view change latency"
+    ],
+    "preconditions": [
+      "new leader can reconstruct state from quorum subset",
+      "TEE prevents equivocation during delay"
+    ],
+    "generalized_form": "when a protocol phase broadcasts state that the next phase only partially reads, defer broadcast and pull on demand. requires consistent pull (TEE or quorum intersection).",
+    "applications": [
+      {
+        "run": "sample_run",
+        "step": 10,
+        "compartment": "C3",
+        "outcome": "OK",
+        "notes": "reduced VC broadcast from O(n^2) to O(n)"
+      }
+    ],
+    "known_failures": [],
+    "verification_trail": {
+      "novelty_check": "no_prior_work_found",
+      "generality_check": "generalizable",
+      "triad_review": "pending",
+      "prior_work_ref": null
+    }
+  },
+  {
+    "id": "T007",
+    "name": "action merging",
+    "class": "known",
+    "source": {
+      "type": "paper",
+      "ref": "Lamport, Specifying Systems, 2002"
+    },
+    "description": "merge fine-grained actions into coarser one when intermediate states are unobservable",
+    "optimizes": [
+      "state space size",
+      "spec simplicity"
+    ],
+    "preconditions": [
+      "intermediate state not referenced by any property",
+      "merged action atomic in execution model"
+    ],
+    "generalized_form": "if A1;A2 always sequential and no property references intermediate state, replace with A12",
+    "applications": [
+      {
+        "run": "sample_run",
+        "step": 6,
+        "compartment": "C1",
+        "outcome": "FAIL",
+        "notes": "HandleVote+DeclareLeader not always sequential"
+      },
+      {
+        "run": "sample_run",
+        "step": 12,
+        "compartment": "C2",
+        "outcome": "OK",
+        "notes": "merged local replicate+ack"
+      }
+    ],
+    "known_failures": [
+      {
+        "run": "sample_run",
+        "step": 6,
+        "compartment": "C1",
+        "reason": "DeclareLeader guarded by quorum, not always sequential after HandleVote"
+      }
+    ],
+    "verification_trail": null
+  },
+  {
+    "id": "T008",
+    "name": "quorum-adaptive leader election",
+    "class": "novel",
+    "source": {
+      "type": "agent-discovered",
+      "ref": "sample_run/step_14/C1"
+    },
+    "description": "adapt election quorum size based on TEE-attested liveness of replicas",
+    "optimizes": [
+      "election latency",
+      "fault tolerance flexibility"
+    ],
+    "preconditions": [
+      "TEE can attest replica liveness",
+      "quorum intersection property holds at minimum quorum"
+    ],
+    "generalized_form": "when trust model provides liveness attestation, dynamically adjust quorum thresholds while preserving quorum intersection for safety.",
+    "applications": [
+      {
+        "run": "sample_run",
+        "step": 14,
+        "compartment": "C1",
+        "outcome": "OK",
+        "notes": "reduced expected election latency ~40% in high-availability scenarios"
+      }
+    ],
+    "known_failures": [],
+    "verification_trail": {
+      "novelty_check": "confirmed_novel",
+      "generality_check": "generalizable",
+      "triad_review": "approved",
+      "prior_work_ref": null
+    }
+  }
+]

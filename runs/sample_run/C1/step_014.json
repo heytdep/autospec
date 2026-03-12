@@ -1,0 +1,49 @@
+{
+  "run_id": "sample_run",
+  "step": 14,
+  "compartment": "C1",
+  "timestamp": "2026-03-10T11:05:00Z",
+  "status": "OK",
+  "proposal": {
+    "technique": "novel",
+    "technique_name": "quorum-adaptive leader election",
+    "target_actions": [
+      "ElectLeader",
+      "DeclareLeader"
+    ],
+    "claim": "TEE liveness attestation enables dynamic election quorum, ~40% latency reduction when all live",
+    "structural_delta": "election latency: ~40% reduction in high-availability. fault tolerance: adaptive quorum",
+    "diff": "--- a/leader_election.tla\n+++ b/leader_election.tla\n+AttestedLive == {r \\in Replicas : TEE_Attested(r)}\n+ElectionQuorum == (Cardinality(AttestedLive) + 1) \\div 2 + 1\n DeclareLeader(candidate) ==\n-  /\\ Cardinality(votes[candidate]) * 2 > Cardinality(Replicas)\n+  /\\ Cardinality(votes[candidate]) >= ElectionQuorum",
+    "novel_technique_description": "dynamically adjust quorum thresholds based on TEE liveness attestation while preserving quorum intersection"
+  },
+  "review": {
+    "verdict": "APPROVE",
+    "argument": "quorum intersection holds: any two quorums overlap by at least 1"
+  },
+  "judgment": {
+    "ruling": "ACCEPT",
+    "reasoning": "novel and correct. TEE liveness lets you shrink quorum safely."
+  },
+  "hard_gate": {
+    "ran": true,
+    "passed": true,
+    "verifier": "TLC",
+    "state_space_before": 18500,
+    "state_space_after": 16200,
+    "properties_checked": [
+      "LeaderUniqueness",
+      "ElectionTermination"
+    ],
+    "counterexample": null
+  },
+  "structural_verification": {
+    "ran": true,
+    "claim_substantiated": true,
+    "evidence": "election quorum now adaptive based on attested liveness"
+  },
+  "failure_reason": null,
+  "technique_registry_update": {
+    "action": "added",
+    "technique_id": "T008"
+  }
+}

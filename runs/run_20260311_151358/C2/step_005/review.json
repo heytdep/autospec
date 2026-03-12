@@ -1,0 +1,41 @@
+{
+  "step": 5,
+  "compartment": "C2",
+  "technique": "D104",
+  "verdict": "ACCEPT",
+  "confidence": 0.97,
+  "summary": "ob_authority_ts is provably equal to ob_primary in all reachable states. Elimination is clean, mechanically correct, and affects zero properties.",
+  "verification": {
+    "equality_proof": {
+      "status": "confirmed",
+      "detail": "Init: both [m in Markets |-> 1] (lines 170, 174). OBViewChange: new_ts = ob_authority_ts[m]+1 (line 430), new_session = ob_primary[m]+1 (line 431). Both assigned in same action (lines 437-438). No other action modifies either. Inductive equality holds trivially."
+    },
+    "property_surface": {
+      "status": "confirmed_zero",
+      "detail": "Searched all 19 properties (P1-P19). ob_authority_ts appears only in P1 (TypeInvariant, line 137) which is being updated. No invariant reads ob_authority_ts as a semantic constraint. P6 uses ce_authority_ts (line 893). P16 uses ce_authority_ts (line 971). No property references ob_authority_ts."
+    },
+    "downstream_impact": {
+      "status": "confirmed_safe",
+      "detail": "DownstreamOMSReceiveOBViewChange (line 604) reads vc.ts from the view change message. Proposal changes vc.ts from new_ts to new_session. Since new_ts = new_session always, oms_cached_ob_ts receives identical values. Monotonicity guard (vc.ts > oms_cached_ob_ts[p][m], line 609) preserved."
+    },
+    "diff_correctness": {
+      "status": "confirmed",
+      "checks": [
+        "VARIABLES declaration: ob_authority_ts removed (line 53-54). ok.",
+        "obVars tuple: ob_authority_ts removed (line 98). ok.",
+        "TypeInvariant: ob_authority_ts[m] in Nat removed (line 137). ok, ob_primary[m] in Nat already covered.",
+        "Init: ob_authority_ts = [m in Markets |-> 1] removed (line 174). ok.",
+        "OBProduceEffect UNCHANGED (line 368): ob_authority_ts removed. ok, but since ob_authority_ts was part of obVars and obVars is NOT in this UNCHANGED clause (individual OB vars listed), removal is correct.",
+        "OBProducePendingAction UNCHANGED (line 386): ob_authority_ts removed. ok, same reasoning.",
+        "OBReceiveMFR UNCHANGED (line 403): ob_authority_ts removed. ok.",
+        "OBCrash UNCHANGED (line 424-425): trailing comma on ob_pending_log removed, ob_authority_ts dropped, closing >> placed. Syntactically correct.",
+        "OBViewChange LET (line 430): new_ts binding removed. new_session remains. ok.",
+        "OBViewChange body (line 438): ob_authority_ts' assignment removed. ok, variable no longer exists.",
+        "OBViewChange VC message (line 448): ts |-> new_ts changed to ts |-> new_session. Semantically identical by equality proof."
+      ]
+    }
+  },
+  "concerns": [],
+  "residual_risk": "None identified. The inductive equality is trivial (same base case, same step, no other modifications). The only external-facing change is the VC message ts field, which carries a provably identical value.",
+  "notes": "The proposer correctly identified that ce_authority_ts cannot be similarly eliminated due to property surface (P6, P16). This asymmetry is accurate. The proposal is a textbook redundant variable elimination."
+}

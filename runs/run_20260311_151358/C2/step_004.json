@@ -1,0 +1,57 @@
+{
+  "compartment": "C2",
+  "step": 4,
+  "status": "OK",
+  "failure_reason": null,
+  "hard_gate": {
+    "ran": false,
+    "passed": null,
+    "note": "TLC unavailable"
+  },
+  "structural_verification": {
+    "ran": true,
+    "claim_substantiated": true,
+    "evidence": "CEProcessFill doesn't echo OB session in MFR. After OB VC, stale MFRs accepted. Fix: add ob_session field to MFR, guard in OBReceiveMFR."
+  },
+  "technique_registry_update": {
+    "action": "updated",
+    "technique_id": "D206"
+  },
+  "proposal": {
+    "technique": "D206",
+    "technique_name": "multi-source vector clocking with per-source cursors (OB session echo in MFR return path)",
+    "target_actions": ["CEProcessFill", "OBReceiveMFR"],
+    "claim": "CEProcessFill sends MFR to msgs_ce_to_ob without echoing the originating OB session, so OBReceiveMFR cannot distinguish MFRs produced from current-session fills vs. rolled-back-session fills, allowing phantom CEFinalization effects after OB view change.",
+    "verdict": "ACCEPT",
+    "judge_confidence": 0.90,
+    "reviewer_confidence": 0.90
+  },
+  "review": {
+    "verdict": "APPROVE",
+    "trace_validity": "confirmed",
+    "orthogonality_to_step2": "confirmed — step 2 guards CE session staleness, step 4 guards OB session staleness; independent failure modes",
+    "diff_correctness": {
+      "CEProcessFill_change": "sound — echoes msg.session (OB session) as ob_session field in MFR",
+      "OBReceiveMFR_change": "sound — adds msg.ob_session = ob_primary[m] conjunct to existential guard"
+    },
+    "composition_check": "clean — combined guard: msg.market=m /\\ msg.session=ob_cached_ce_session[m] /\\ msg.ob_session=ob_primary[m]",
+    "issues": [
+      {"id": "R1", "severity": "observation", "description": "Stale MFRs with wrong ob_session accumulate under LoseCEtoOB (no fairness). Matches existing msgs_view_change pattern.", "action_required": false},
+      {"id": "R2", "severity": "observation", "description": "OBFinalizationFillCoherence property not formally defined. Deferred to future properties pass.", "action_required": false},
+      {"id": "R3", "severity": "observation", "description": "Multiple stale Fills from same defunct OB session all blocked post-OBViewChange. No partial acceptance scenario.", "action_required": false}
+    ]
+  },
+  "judgment": {
+    "verdict": "ACCEPT",
+    "ruling": "Proposal accepted. Trace valid and fully reproducible from spec. Fix is mechanically correct and compositionally clean with step 2.",
+    "trace_confirmed": true,
+    "fix_confirmed": true,
+    "orthogonality_confirmed": true,
+    "risk": "low",
+    "open_observations": [
+      {"id": "R1", "disposition": "acknowledged, no action required"},
+      {"id": "R2", "disposition": "track for properties pass"},
+      {"id": "R3", "disposition": "verified correct, no action required"}
+    ]
+  }
+}

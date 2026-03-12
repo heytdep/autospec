@@ -1,0 +1,36 @@
+{
+  "step": 3,
+  "compartment": "C3",
+  "verdict": "reject",
+  "confidence": 0.95,
+  "ruling": "Reviewer is correct. The proposed INV20 replacement conjunct is not an invariant. Pre-existing archiver records from session S survive OBViewChange intact: ob_archiver_store is UNCHANGED by OBViewChange (line 452), so any effect ingested during session S remains in the store after ob_primary advances to S+1. Those records have e.session = S < ob_primary[e.market] = S+1, violating the proposed invariant immediately and without any new ingest. The proposer's safety argument addresses only the forward direction (GC cannot fire during view change) but does not address the backward direction (pre-existing records already in the store when view change fires). This is a logical error in the invariant formulation, not a minor gap.",
+  "critical_findings": [
+    {
+      "tag": "inv20_not_invariant",
+      "disposition": "sustained",
+      "reasoning": "The invariant (\\A e \\in ob_archiver_store[a] : e.session >= ob_primary[e.market]) fails on any state reachable via: ArchiverIngestOB at session S, then OBViewChange advancing ob_primary to S+1. The ingested S-session record is still present; the invariant is violated. TLC counterexample path cited by reviewer (Init -> OBProduceEffect -> ArchiverIngestOB -> OBCrash -> OBViewChange -> invariant check) is valid. The proposer's ob_alive guard prevents GC during view change but cannot retroactively fix the invariant violation caused by records already in the store."
+    }
+  ],
+  "medium_findings": [
+    {
+      "tag": "gc_deletes_pre_vc_ingested_effects",
+      "disposition": "sustained_as_open_question",
+      "reasoning": "The reviewer correctly identifies that the original spec intentionally retains OB archiver data indefinitely (line 997: 'OB archivers: effects never removed'). This asymmetry with CE archivers may be deliberate given CE has a checkpoint/L1 anchoring path that OB lacks. The proposal does not cite a trust-model basis for OB data being recoverable once removed from archivers. This is a design-level question that must be resolved before any OB archiver GC can be justified."
+    },
+    {
+      "tag": "unchanged_clause_incomplete",
+      "disposition": "dismissed",
+      "reasoning": "Reviewer correctly downgraded to note. The UNCHANGED clause is consistent with existing GC action patterns and contains no actual error."
+    }
+  ],
+  "proposer_strengths_acknowledged": [
+    "CE/OB GC asymmetry correctly identified as a structural gap",
+    "ob_alive guard for mutual exclusion with OBViewChange is correct",
+    "ob_archiver_pending correctly excluded from scope",
+    "Session-scoped granularity is the right mechanism if OB GC is eventually justified"
+  ],
+  "required_for_resubmission": [
+    "Either remove the INV20 conjunct entirely and rely only on the original CE-only conjunct with an updated comment, OR reformulate so the invariant does not require e.session >= ob_primary[e.market] for records that predate the current view",
+    "Provide trust-model or spec-level justification that old-session OB archiver data is safe to discard (i.e., cite an external persistence mechanism equivalent to CE's L1/checkpoint anchor), or withdraw the GC action and document the asymmetry as intentional"
+  ]
+}

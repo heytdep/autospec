@@ -1,0 +1,35 @@
+{
+  "ruling": "REJECT",
+  "reasoning": "The reviewer's core objection is confirmed by the spec. CEViewChange at line 320 has UNCHANGED <<ce_checkpoint_seq>>, meaning ce_checkpoint_seq carries over from the prior session unchanged. CECheckpoint at line 281 sets ce_checkpoint_seq' = ce_seq - 1, which is bounded by the session-local ce_seq at checkpoint time. After a view change, ce_seq' = recovered + 1 (line 307), a fresh value for the new session starting from wherever recovery lands. In the reviewer's counterexample: session 2 checkpoints at seq 50 (ce_checkpoint_seq=50), session 3 crash happens after producing seqs 26-35 with backup at 33. Proposed anchor = MAX(33, 50) = 50. CEArchiverSeqsForSession(ce_primary) queries the OLD session (ce_primary is still session 2's id in the LET block, since ce_primary' = new_session is set in the IN block, not the LET). So available = archiver seqs for session 2. MaxContiguousFrom(51, session2_archivers) returns 50 if archivers don't have seq 51 (they don't, session 2 only produced up to 50). recovered = 50. ce_seq' = 51. Session 3 effects at seqs 34-35 are NEVER queried: the archiver query is for session 2, not session 3, and even if session 3 archivers had seqs 34-35, they are never consulted. ce_log' = {e in ce_log : e.seq <= 50} retains session 2 and session 3 effects by seq number, but session 3 effects 34-35 are present only if they were broadcast and made it into ce_log; archivers are not consulted for those. The gap in ce_seq space (36-50 never produced in session 3) is a permanent sequence hole. This directly violates P4 (SurgicalRollbackPrecision): the 'recovered' value (50) does not reflect the maximal contiguous prefix of session 3's actual output. The proposer's claim that 'both represent contiguous prefixes of the log' is false across session boundaries: ce_checkpoint_seq is a session-2 prefix, MaxOfSet(ce_backup_applied) is a session-3 prefix. They are not comparable quantities in the same sequence space. The proposer's monotonicity argument ('higher anchor = more recovery') is backward: MaxContiguousFrom(anchor+1, available) with a larger anchor shifts the search window past the current session's archiver range, yielding less recovery of current-session effects. The diff is syntactically valid (line 32-35 of review) but semantically incorrect under multi-session execution.",
+  "proposer_claim_assessment": "invalid",
+  "reviewer_objections_assessment": [
+    {
+      "objection": "ce_checkpoint_seq not reset on view change (line 320 UNCHANGED), so it can exceed current session's sequence range",
+      "ruling": "sustained",
+      "evidence": "Line 320: UNCHANGED <<ce_checkpoint_seq>> confirmed. Line 281: ce_checkpoint_seq' = ce_seq - 1 only set in CECheckpoint, which fires only while ce_alive (line 279). After view change, ce_seq' = recovered + 1 (line 307); if prior session had a higher checkpoint, ce_checkpoint_seq > ce_seq - 1 in the new session."
+    },
+    {
+      "objection": "backup_applied and checkpoint_seq are not comparable (different session prefixes after view change)",
+      "ruling": "sustained",
+      "evidence": "CEArchiverSeqsForSession(ce_primary) at line 304 queries ce_primary (old session id in LET scope). backup_applied tracks current session seqs (cleared to {} at line 312 on view change, so it reflects the post-recovery session). checkpoint_seq reflects the pre-crash session. MAX of these two numbers is meaningless as a recovery anchor."
+    },
+    {
+      "objection": "Higher anchor causes MaxContiguousFrom to skip current-session recoverable effects",
+      "ruling": "sustained",
+      "evidence": "MaxContiguousFrom(start, available) at lines 25-30: returns s-1 when s not in available. If anchor=50 and available = session-2 archiver seqs, MaxContiguousFrom(51, available) = 50 immediately if 51 not in available. Session-3 effects at seqs 34-35 are never queried because available is session-2 keyed (line 304: CEArchiverSeqsForSession(ce_primary) where ce_primary is still old session in LET)."
+    },
+    {
+      "objection": "Sequence gap: ce_seq' = 51 but session 3 only produced to 35, leaving seqs 36-50 permanently unproduced",
+      "ruling": "sustained",
+      "evidence": "ce_seq' = recovered + 1 (line 307). recovered = 50 in the counterexample. Session 4 starts from 51. Seqs 36-50 were never produced in any session. Downstream cursors expecting contiguous CE seq advancement would stall or skip."
+    },
+    {
+      "objection": "P19 GC condition (e.seq > ce_checkpoint_seq) could GC session-3 effects that were never recovered",
+      "ruling": "sustained",
+      "evidence": "P19 formal definition (props.json line 171): e.seq > ce_checkpoint_seq \\/ ce_archiver_ack_count < GC_K. With ce_checkpoint_seq=50, effects with seq <= 50 (including session-3 effects at 34-35) are eligible for GC if ack count >= GC_K, even though they were never recovered. This is a real regression."
+    }
+  ],
+  "revision_guidance": null,
+  "property_essence_risk": "high",
+  "notes_for_journal": "Cross-session anchor comparisons are unsafe. ce_checkpoint_seq is session-scoped at write time but persists across view changes without reset. Any proposed improvement to CEViewChange anchor must first verify that checkpoint_seq is bounded by the current session's sequence range, or must explicitly filter checkpoint_seq to only apply when ce_primary has not changed since the checkpoint was taken (i.e., gating on session equality). The proposer's intuition (backup and checkpoint are independent durability sources) is sound within a single session but breaks across session boundaries because view change resets ce_seq but not ce_checkpoint_seq."
+}

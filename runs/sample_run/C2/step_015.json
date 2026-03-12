@@ -1,0 +1,48 @@
+{
+  "run_id": "sample_run",
+  "step": 15,
+  "compartment": "C2",
+  "timestamp": "2026-03-10T11:10:00Z",
+  "status": "FAIL",
+  "proposal": {
+    "technique": "U004",
+    "technique_name": "invariant strengthening",
+    "target_actions": [
+      "CommitEntry"
+    ],
+    "claim": "stronger LogMatching invariant enables future optimizations",
+    "structural_delta": "provability: stronger invariant for future use",
+    "diff": "...strengthened invariant..."
+  },
+  "review": {
+    "verdict": "APPROVE",
+    "argument": "strengthened invariant is valid"
+  },
+  "judgment": {
+    "ruling": "ACCEPT",
+    "reasoning": "valid but speculative"
+  },
+  "hard_gate": {
+    "ran": true,
+    "passed": true,
+    "verifier": "TLC",
+    "state_space_before": 31200,
+    "state_space_after": 31200,
+    "properties_checked": [
+      "LogMatching",
+      "LeaderCompleteness",
+      "StateMachineSafety"
+    ],
+    "counterexample": null
+  },
+  "structural_verification": {
+    "ran": true,
+    "claim_substantiated": false,
+    "evidence": "no structural improvement, state space unchanged, lateral move"
+  },
+  "failure_reason": "hard gate passed but structural claim unsubstantiated",
+  "technique_registry_update": {
+    "action": "none",
+    "technique_id": null
+  }
+}

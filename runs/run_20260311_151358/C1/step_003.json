@@ -1,0 +1,51 @@
+{
+  "compartment": "C1",
+  "step": 3,
+  "status": "OK",
+  "failure_reason": null,
+  "hard_gate": {
+    "ran": false,
+    "passed": null,
+    "note": "TLC unavailable"
+  },
+  "structural_verification": {
+    "ran": true,
+    "claim_substantiated": true,
+    "evidence": "All 6 Snapshot references traced, none type-discriminating. Downstream consumers select by session+seq only. Collapse from 2 effects to 1 per fill is safe."
+  },
+  "technique_registry_update": {
+    "action": "added",
+    "technique_id": "T_novel_001"
+  },
+  "proposal": {
+    "technique": "novel",
+    "technique_name": "fill-snapshot-collapse",
+    "technique_class": "structural simplification",
+    "target_actions": ["CEProcessFill", "CEProcessRecoveredPending"],
+    "claim": "CEProcessFill and CEProcessRecoveredPending each produce an MFR+Snapshot pair atomically, consuming 2 sequence numbers per fill. The Snapshot carries no payload distinction from MFR in the spec (both are type-tagged records in ce_log with identical structure [type, seq, session]). No invariant or downstream action distinguishes MFR from Snapshot in its guards or cursor logic (OMSConsumeCE advances cursor by eff.seq = cursor+1 regardless of type, CEBackupApply applies by seq regardless of type, ArchiverIngestCE stores regardless of type). Collapsing MFR+Snapshot into a single MFR effect per fill halves the sequence-space cost of fills, reduces ce_log growth rate for fill-heavy workloads, and simplifies CEProcessFill and CEProcessRecoveredPending from 2-effect atomic production to 1-effect production, eliminating the ce_seq+1<=MaxSeq guard strengthening (only ce_seq<=MaxSeq needed).",
+    "verdict": "ACCEPT",
+    "judge_confidence": 0.96,
+    "reviewer_confidence": 0.93
+  },
+  "review": {
+    "verdict": "ACCEPT",
+    "issues_found": [],
+    "snapshot_references_checked": 6,
+    "downstream_type_agnosticism_verified": true
+  },
+  "judgment": {
+    "verdict": "ACCEPT",
+    "ruling": "Proposal is correct. No property is violated by collapsing the MFR+Snapshot pair to a single MFR effect per fill. The Snapshot type carries no semantic weight in the spec: it is never type-discriminated by any consumer, guard, or invariant. The guard simplification from ce_seq+1<=MaxSeq to ce_seq<=MaxSeq is correct and aligns fill actions structurally with CEProduceDirectEffect. Reviewer confidence 0.93 is warranted; judge concurs at 0.96. ACCEPT.",
+    "structural_benefit_confirmed": {
+      "state_space_reduction": true,
+      "guard_simplification": true,
+      "seq_space_halved_for_fills": true
+    },
+    "open_items": [
+      {
+        "severity": "cosmetic",
+        "item": "Snapshot remains in CEEffectTypes as a dead type. Removal from CEEffectTypes and from CEProduceDirectEffect exclusion sets (spec:223, spec:774) is a valid follow-up but out of scope for this step."
+      }
+    ]
+  }
+}

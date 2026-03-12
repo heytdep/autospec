@@ -1,0 +1,48 @@
+{
+  "run_id": "sample_run",
+  "step": 1,
+  "compartment": "C1",
+  "timestamp": "2026-03-10T10:00:00Z",
+  "status": "OK",
+  "proposal": {
+    "technique": "U001",
+    "technique_name": "symmetry reduction",
+    "target_actions": [
+      "ElectLeader",
+      "HandleVote"
+    ],
+    "claim": "replicas are interchangeable in election, symmetry reduces state space by ~6x for 3 replicas",
+    "structural_delta": "state space reduction via replica symmetry: 3! = 6x reduction",
+    "diff": "--- a/leader_election.tla\n+++ b/leader_election.tla\n@@ -5,3 +5,4 @@\n CONSTANT Replicas\n+SYMMETRY ReplicaSymmetry\n+ReplicaSymmetry == Permutations(Replicas)"
+  },
+  "review": {
+    "verdict": "APPROVE",
+    "argument": "replicas are indeed symmetric in election, no replica-specific logic"
+  },
+  "judgment": {
+    "ruling": "ACCEPT",
+    "reasoning": "symmetry holds, replicas have identical behavior in election actions"
+  },
+  "hard_gate": {
+    "ran": true,
+    "passed": true,
+    "verifier": "TLC",
+    "state_space_before": 142857,
+    "state_space_after": 23809,
+    "properties_checked": [
+      "LeaderUniqueness",
+      "ElectionTermination"
+    ],
+    "counterexample": null
+  },
+  "structural_verification": {
+    "ran": true,
+    "claim_substantiated": true,
+    "evidence": "state space reduced from 142857 to 23809, ratio 6.0x matching 3! prediction"
+  },
+  "failure_reason": null,
+  "technique_registry_update": {
+    "action": "updated",
+    "technique_id": "U001"
+  }
+}

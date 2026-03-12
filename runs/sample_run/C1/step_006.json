@@ -1,0 +1,45 @@
+{
+  "run_id": "sample_run",
+  "step": 6,
+  "compartment": "C1",
+  "timestamp": "2026-03-10T10:25:00Z",
+  "status": "FAIL",
+  "proposal": {
+    "technique": "T007",
+    "technique_name": "action merging",
+    "target_actions": [
+      "HandleVote",
+      "DeclareLeader"
+    ],
+    "claim": "merge HandleVote and DeclareLeader since they always execute sequentially",
+    "structural_delta": "spec simplicity: 2 actions -> 1",
+    "diff": "...merged actions..."
+  },
+  "review": {
+    "verdict": "REJECT",
+    "argument": "HandleVote fires many times before DeclareLeader fires once. Not always sequential."
+  },
+  "judgment": {
+    "ruling": "REJECT",
+    "reasoning": "precondition violated: different firing patterns"
+  },
+  "hard_gate": {
+    "ran": false,
+    "passed": false,
+    "verifier": "TLC",
+    "state_space_before": 23809,
+    "state_space_after": null,
+    "properties_checked": [],
+    "counterexample": null
+  },
+  "structural_verification": {
+    "ran": false,
+    "claim_substantiated": false,
+    "evidence": null
+  },
+  "failure_reason": "triad_rejected",
+  "technique_registry_update": {
+    "action": "failure_recorded",
+    "technique_id": "T007"
+  }
+}

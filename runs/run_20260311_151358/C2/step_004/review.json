@@ -1,0 +1,53 @@
+{
+  "step": 4,
+  "compartment": "C2",
+  "verdict": "APPROVE",
+  "confidence": 0.90,
+  "summary": "The proposal correctly identifies a real orthogonal gap to step 2. Step 2 guards on CE session staleness (msg.session = ob_cached_ce_session), step 4 guards on OB session staleness (msg.ob_session = ob_primary). Both guards are needed: they cover independent failure modes (CE crash vs OB crash). The trace is valid, the diff is minimal and mechanical, and the two fixes compose cleanly since they add independent conjuncts to OBReceiveMFR's existential guard.",
+
+  "structural_assessment": {
+    "trace_validity": "Confirmed. The trace (proposal lines 15-22) is reproducible in the spec: OB session 1 produces Fill (OBProduceEffect, line 361-363 sends {type:Fill, market:m, seq:ob_seq[m], session:ob_primary[m]}). OB crashes, OBViewChange promotes session 2 with recovered < ob_seq (line 439: ob_log pruned to seq <= recovered). CE processes the stale Fill from msgs_ob_to_ce (CEProcessFill, line 238-246). MFR sent to msgs_ce_to_ob carries ce_primary as session, NOT the originating ob_primary. OBReceiveMFR (line 391-399) has no OB session guard, consumes the MFR, produces phantom CEFinalization at session 2.",
+    "orthogonality_to_step2": "Confirmed. Step 2 adds msg.session = ob_cached_ce_session[m] to OBReceiveMFR, checking CE session freshness. In step 4's scenario, CE never crashes, so CE session is current and step 2's guard passes. The problem is that the Fill originated from a now-defunct OB session. These are independent dimensions of staleness.",
+    "diff_correctness": {
+      "CEProcessFill_change": "Sound. Adding ob_session |-> msg.session to the MFR record simply echoes the OB session from the incoming Fill message. msg is bound by \\E msg \\in msgs_ob_to_ce, and OBProduceEffect (line 363) includes session |-> ob_primary[m] in Fill messages. The echo is well-defined.",
+      "OBReceiveMFR_change": "Sound. Adding msg.ob_session = ob_primary[m] as a conjunct to the existential guard blocks MFRs that originated from a prior OB session. After OBViewChange sets ob_primary[m] = new_session, only MFRs echoing the new session pass."
+    }
+  },
+
+  "composition_check": {
+    "step2_plus_step4": "After both fixes, OBReceiveMFR's existential guard is: msg.market = m /\\ msg.session = ob_cached_ce_session[m] /\\ msg.ob_session = ob_primary[m]. This requires both CE session freshness AND OB session freshness. The MFR record in msgs_ce_to_ob carries three identifying fields: session (CE), ob_session (OB), market. No conflict between the two diffs.",
+    "message_schema": "After step 4, msgs_ce_to_ob MFR records have fields: {type, seq, session, market, ob_session}. The session field (CE session) is used by step 2's guard. The ob_session field (OB session) is used by step 4's guard. No field collision."
+  },
+
+  "property_preservation_audit": {
+    "P3_OBSequenceMonotonic": "Agreed. OBReceiveMFR is more constrained (fewer enabled transitions). When it fires, ob_seq increment is unchanged. No regression.",
+    "P5_OBNamespaceSeparation": "Agreed. CEFinalization type unchanged.",
+    "P10_OBLogBounded": "Agreed. seq = ob_seq[m], then ob_seq incremented. Bound maintained.",
+    "P13_OBBackupAppliedValid": "Agreed. OBBackupApply reads from msgs_ob_broadcast, unaffected.",
+    "P14_OBIndependenceFromCE": "Agreed. The guard adds no new coupling direction, only restricts existing coupling.",
+    "P1_TypeInvariant": "Agreed with caveat. TypeInvariant does not explicitly constrain msgs_ce_to_ob record schema. The new ob_session field (Nat) is structurally valid but invisible to P1. This is an existing spec pattern, not a regression."
+  },
+
+  "issues": [
+    {
+      "id": "R1",
+      "severity": "observation",
+      "description": "Stale MFR drainage relies on LoseCEtoOB which has no fairness constraint. Stale MFRs with wrong ob_session accumulate permanently under strong fairness. The proposal acknowledges this (stale_message_drainage section) and correctly notes this matches existing patterns (e.g., msgs_view_change). Not a blocker.",
+      "action_required": false
+    },
+    {
+      "id": "R2",
+      "severity": "observation",
+      "description": "The proposal suggests a new property OBFinalizationFillCoherence but does not define it formally. This is appropriate for a proposal (properties are added separately), but worth tracking for a future properties pass.",
+      "action_required": false
+    },
+    {
+      "id": "R3",
+      "severity": "observation",
+      "description": "Edge case: if CE processes multiple stale Fills from the same defunct OB session before OBViewChange, multiple stale MFRs accumulate in msgs_ce_to_ob, all with the old ob_session. The guard correctly blocks all of them post-OBViewChange. Verified: no partial acceptance scenario.",
+      "action_required": false
+    }
+  ],
+
+  "risk_assessment": "Low. The change is a pure guard addition (reduces enabled transitions) plus an opaque echo field (no CE state mutation). Composition with step 2 is clean. No new variables, no Init changes, no UNCHANGED clause changes needed (ob_session is a message field, not a state variable)."
+}

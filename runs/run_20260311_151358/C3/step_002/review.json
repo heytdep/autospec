@@ -1,0 +1,51 @@
+{
+  "step": 2,
+  "compartment": "C3",
+  "verdict": "reject",
+  "confidence": 0.92,
+  "issues": [
+    {
+      "severity": "critical",
+      "tag": "fairness_weakening",
+      "description": "Dropping WF_vars(ArchiverIngestCEFromBackup(a)) weakens the liveness guarantee. Original spec has two independent WF conjuncts: (1) WF_vars(ArchiverIngestCE(a)) guarantees eventual ingest from broadcast when msgs_ce_broadcast is non-empty, and (2) WF_vars(ArchiverIngestCEFromBackup(a)) guarantees eventual ingest from backup when ce_backup_alive and ce_backup_applied have entries in ce_log. The unified action has a single WF: if the union of sources is non-empty, the action eventually fires. But the nondeterministic choice over the union means the scheduler can always select from one source and starve the other. Concretely: if msgs_ce_broadcast is perpetually non-empty (effects keep arriving) AND the backup path is also enabled, WF only forces the unified action to fire, not to pick the backup source. Under the original spec, the backup path MUST eventually fire independently. This matters for P18 (CEArchiverSafetyGuarantee): the third disjunct (ce_backup_alive /\\ e in ce_log) is the fallback when broadcast messages are lost via LoseCEBroadcast. If the archiver can be starved from ever reading the backup path (because broadcast keeps refilling), then after a LoseCEBroadcast event there is a schedule where backup-applied effects never reach any archiver, violating the spirit of the DA guarantee even though P18 as stated is a safety property (it holds vacuously because the broadcast message or backup path still exists, the effect just never gets archived).",
+      "affected_properties": ["P18"],
+      "spec_lines": "834-835 (original fairness), 721-724 (LoseCEBroadcast)"
+    },
+    {
+      "severity": "medium",
+      "tag": "source_set_semantics_mismatch",
+      "description": "The unified source set '{e \\in ce_log : e.seq \\in ce_backup_applied}' reads FULL effect records from ce_log, while msgs_ce_broadcast also contains full effect records. However, the original ArchiverIngestCEFromBackup uses a double existential: first picks s from ce_backup_applied, then finds eff in ce_log with eff.seq = s. The unified version flattens this to a set comprehension filter. This is semantically equivalent IF ce_log contains at most one effect per seq value (which P2/CESequenceMonotonic enforces within a session, but ce_log can contain effects from multiple sessions with the same seq after recovery). The set comprehension {e \\in ce_log : e.seq \\in ce_backup_applied} would include effects from ALL sessions matching those seq numbers, not just the current session. The original double-existential has the same behavior (it also does not filter by session). So this is not a correctness bug per se, but the unified version makes the cross-session exposure more visible. If ce_backup_applied only contains seq numbers from the current session (which it should after surgical rollback), this is fine, but worth flagging.",
+      "affected_properties": ["P7"],
+      "spec_lines": "637-648 (original backup action), 46-54 (proposed unified source)"
+    },
+    {
+      "severity": "low",
+      "tag": "state_space_claim_imprecise",
+      "description": "Proposal claims 'slight reduction in TLC exploration overhead due to one fewer disjunct in Next'. This is misleading. The unified action's source set is a union that TLC must enumerate, which in practice means TLC evaluates both sub-expressions every time it tries the action. The number of distinct successor states is unchanged (same transitions exist). The only saving is one fewer action label in the Next disjunction, which is negligible. Not a correctness issue, but the proposal overstates the benefit.",
+      "affected_properties": [],
+      "spec_lines": "N/A"
+    }
+  ],
+  "strengths": [
+    "Correct observation that both actions produce identical record shapes ({type, seq, session})",
+    "Correct application of D107/D109 (archiver source-agnosticism)",
+    "The ce_backup_alive guard is correctly preserved via the IF/THEN/ELSE in the unified source set"
+  ],
+  "recommendation": "The critical fairness weakening issue must be addressed. Two possible fixes: (1) Keep both actions separate (abandon this proposal). (2) If unification is desired, split the unified action into two sub-cases within one definition but retain TWO fairness conjuncts, e.g. define ArchiverIngestCEBroadcast(a) and ArchiverIngestCEBackup(a) as the two cases, then have ArchiverIngestCE(a) == ArchiverIngestCEBroadcast(a) \\/ ArchiverIngestCEBackup(a) with WF on each sub-action. But this defeats the purpose of unification. The cleaner path is to reject and keep the original two-action structure.",
+  "properties_at_risk": ["P18"],
+  "review_trace": {
+    "files_read": [
+      "/tmp/formal-spec-1773177791/spec.tla (lines 626-650, 718-724, 800-844)",
+      "/tmp/formal-spec-1773177791/TplusUnifiedDA_props.json",
+      "/tmp/formal-spec-1773177791/trust-model.md",
+      "proposal.json"
+    ],
+    "key_lines_examined": {
+      "ArchiverIngestCE_original": "626-635",
+      "ArchiverIngestCEFromBackup_original": "637-649",
+      "LoseCEBroadcast": "721-724",
+      "Fairness_CE_archivers": "833-835",
+      "Next_CE_archivers": "805-806"
+    }
+  }
+}

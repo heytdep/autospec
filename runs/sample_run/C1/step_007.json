@@ -1,0 +1,48 @@
+{
+  "run_id": "sample_run",
+  "step": 7,
+  "compartment": "C1",
+  "timestamp": "2026-03-10T10:30:00Z",
+  "status": "OK",
+  "proposal": {
+    "technique": "T003",
+    "technique_name": "trust assumption exploitation (TEE)",
+    "target_actions": [
+      "HandleVote",
+      "ElectLeader"
+    ],
+    "claim": "TEE non-equivocation makes vote signatures redundant",
+    "structural_delta": "message size: remove sig from votes. protocol complexity: remove verification step",
+    "diff": "--- a/leader_election.tla\n+++ b/leader_election.tla\n HandleVote(replica, candidate) ==\n-  /\\ VerifySignature(replica, <<\"vote\", candidate>>)\n-  /\\ votes' = [votes EXCEPT ![candidate] = votes[candidate] \\cup {<<replica, Sign(...)>>}]\n+  /\\ votes' = [votes EXCEPT ![candidate] = votes[candidate] \\cup {replica}]"
+  },
+  "review": {
+    "verdict": "APPROVE",
+    "argument": "TEE non-equivocation prevents conflicting votes. signature was only for authenticity, which TEE provides."
+  },
+  "judgment": {
+    "ruling": "ACCEPT",
+    "reasoning": "trust model explicitly includes TEE non-equivocation"
+  },
+  "hard_gate": {
+    "ran": true,
+    "passed": true,
+    "verifier": "TLC",
+    "state_space_before": 23809,
+    "state_space_after": 18500,
+    "properties_checked": [
+      "LeaderUniqueness",
+      "ElectionTermination"
+    ],
+    "counterexample": null
+  },
+  "structural_verification": {
+    "ran": true,
+    "claim_substantiated": true,
+    "evidence": "vote messages no longer carry signatures"
+  },
+  "failure_reason": null,
+  "technique_registry_update": {
+    "action": "updated",
+    "technique_id": "T003"
+  }
+}

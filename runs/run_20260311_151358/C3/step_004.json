@@ -1,0 +1,51 @@
+{
+  "compartment": "C3",
+  "step": 4,
+  "status": "OK",
+  "failure_reason": null,
+  "hard_gate": {
+    "ran": false,
+    "passed": null,
+    "note": "TLC unavailable"
+  },
+  "structural_verification": {
+    "ran": true,
+    "claim_substantiated": true,
+    "evidence": "OMS consumption actions fire while muted (no ~oms_muted guard). OMSViewChange wipes consumed effects. Fix adds ~oms_muted[p] guard to all 3 consumption actions."
+  },
+  "technique_registry_update": {
+    "action": "updated",
+    "technique_id": "D208"
+  },
+  "proposal": {
+    "technique": "D208",
+    "technique_name": "reactive constraint enforcement on state change",
+    "target_actions": ["OMSConsumeCE", "OMSConsumeOB", "OMSConsumePending"],
+    "claim": "OMS consumption actions lack ~oms_muted guard, allowing cursor advancement while muted; OMSViewChange then wipes oms_log, losing effects that archivers may not have ingested yet, breaking OMS archival completeness.",
+    "verdict": "accept",
+    "judge_confidence": 0.88,
+    "reviewer_confidence": 0.88
+  },
+  "review": {
+    "verdict": "accept",
+    "bug_confirmed": true,
+    "trace_validated": true,
+    "severity_assessment": "medium — effects not globally lost (exist in CE/OB archivers), but OMS archival path has a gap; no explicit OMS archival completeness invariant in spec",
+    "critical_interaction": "OMSViewChange cursor computation at line 516 uses post-consumption cursor as starting offset; effects consumed-but-wiped are unreachable in new session",
+    "fix_assessment": "minimal and correct — ~oms_muted[p] guard blocks consumption during recovery window; OMSViewChange is the designed catch-up path",
+    "objections": [
+      {"point": "severity overstatement", "detail": "No explicit OMS archival completeness property in spec; consequence is semantic incorrectness, not a numbered invariant violation. Severity is medium not high."}
+    ]
+  },
+  "judgment": {
+    "verdict": "accept",
+    "ruling": "Bug is real. Fix is minimal and correct. Reviewer's overstatement objection noted but does not change ruling — muted OMS should not consume; spec should enforce this.",
+    "bug_real": true,
+    "fix_correctness": "Adding ~oms_muted[p] as precondition guard to all three consumption actions blocks consumption during recovery window. No liveness risk: WF on OMSUnmute and archiver ingest actions ensures muted period terminates.",
+    "liveness_preserved": true,
+    "state_space_impact": "reduces — three actions disabled during muted period",
+    "properties_violated_by_bug": "none specified — semantic bug only",
+    "properties_affected_by_fix": "none — INV18, INV11, INV8 unaffected",
+    "severity": "medium"
+  }
+}

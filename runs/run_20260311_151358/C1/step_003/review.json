@@ -1,0 +1,96 @@
+{
+  "step": 3,
+  "compartment": "C1",
+  "verdict": "ACCEPT",
+  "reviewer_confidence": 0.93,
+  "verification_trace": {
+    "snapshot_references_checked": {
+      "line_16": "CEEffectTypes definition includes Snapshot. Remains as dead type. Harmless.",
+      "line_223": "CEProduceDirectEffect excludes {MFR, Snapshot}. Still correct: excluding a never-produced type is a no-op.",
+      "line_234_240": "CEProcessFill original MFR+Snapshot pair. Target of this change.",
+      "line_334_335": "CEProcessRecoveredPending original MFR+Snapshot pair. Target of this change.",
+      "line_774": "Next formula excludes {MFR, Snapshot} from CEProduceDirectEffect. Unchanged by this proposal."
+    },
+    "downstream_type_agnosticism_verified": {
+      "CEBackupApply": "spec:254-263. Selects by session + seq (next_expected). No type guard. Type-agnostic.",
+      "OMSConsumeCE": "spec:460-469. Selects by session + seq contiguity (cursor+1). Copies eff.type passively into local_eff. No type-specific branching.",
+      "ArchiverIngestCE": "spec:627-631. Stores full record unconditionally from msgs_ce_broadcast. No type filter.",
+      "ArchiverIngestCEFromBackup": "spec:638-645. Selects from ce_log by seq. No type filter.",
+      "CEViewChange": "spec:298-323. Filters ce_log by e.seq <= recovered. No type guard."
+    },
+    "property_verification": {
+      "P1_TypeInvariant": {
+        "status": "SAFE",
+        "trace": "ce_log subset of [type: CEEffectTypes, seq: 1..MaxSeq, session: Nat] (spec:122). MFR is in CEEffectTypes (spec:16). All produced effects have type MFR, which is in the domain. Snapshot remains in CEEffectTypes as dead member, no type violation."
+      },
+      "P2_CESequenceMonotonic": {
+        "status": "SAFE",
+        "trace": "Uniqueness within session: each fill produces one effect at ce_seq, then increments ce_seq. No two effects in same session share a seq. Identical reasoning to CEProduceDirectEffect which already produces 1 effect per action."
+      },
+      "P4_SurgicalRollbackPrecision": {
+        "status": "SAFE",
+        "trace": "Invariant: old-session effects have seq <= ce_last_recovered_seq. Recovery filters by e.seq <= recovered (spec:309). Fewer effects per fill means fewer seqs to recover but contiguity is preserved. MaxContiguousFrom still works: it walks from anchor+1 upward through available archiver seqs."
+      },
+      "P8_OMSDerivedState": {
+        "status": "SAFE",
+        "trace": "INV8 (spec:906-909): e.type in CEEffectTypes union OBEffectTypes union {PendingFill}. OMSConsumeCE copies eff.type from CE broadcast (spec:466). MFR effects have type MFR which is in CEEffectTypes. Snapshot no longer produced but Snapshot remaining in CEEffectTypes is irrelevant since INV8 checks membership, not exhaustive production."
+      },
+      "P9_CELogBounded": {
+        "status": "SAFE",
+        "trace": "e.seq < ce_seq. Single effect at ce_seq, then ce_seq' = ce_seq+1. Effect has seq = ce_seq (before increment), ce_seq' = ce_seq+1. So e.seq < ce_seq'. Identical to CEProduceDirectEffect pattern."
+      },
+      "P12_CEBackupAppliedValid": {
+        "status": "SAFE",
+        "trace": "Every s in ce_backup_applied has a ce_log entry. Backup applies effects from msgs_ce_broadcast which were added to ce_log in the same atomic step. With one effect per fill, backup applies one seq per fill. Each such seq exists in ce_log."
+      },
+      "P6_PhantomLeaderRejection": {
+        "status": "UNAFFECTED",
+        "trace": "About authority_ts in view change messages. No interaction with effect production."
+      },
+      "P16_DownstreamCacheCoherence": {
+        "status": "UNAFFECTED",
+        "trace": "About cached timestamps. No interaction with effect production."
+      },
+      "P17_OMSMutedUntilCaughtUp": {
+        "status": "SAFE",
+        "trace": "ce_last_recovered_seq computed from archiver contiguity (spec:306). With 1 effect per fill, archiver stores have 1 entry per fill instead of 2. MaxContiguousFrom walks sequentially: if seqs 1,2,3 are available, recovered=3. With fewer total seqs, recovered value is smaller but oms_ce_cursor also advances through fewer seqs. Both sides scale proportionally. Safety condition preserved."
+      },
+      "P18_CEArchiverSafetyGuarantee": {
+        "status": "SAFE",
+        "trace": "Three-way disjunction per s in ce_backup_applied (spec:P18 formal def). Each applied seq has: (a) archiver store entry via ArchiverIngestCE, (b) msgs_ce_broadcast entry from the producing action, (c) ce_log entry from the producing action. All three legs hold for single-effect fills identically to how they hold for direct effects."
+      },
+      "P19_ArchiverDAMonotonicity": {
+        "status": "SAFE",
+        "trace": "About GC conditions on archiver stores. Effect production count per fill does not affect GC logic (GC is keyed on checkpoint_seq and ack_count). Fewer stored effects per fill reduces GC pressure, pure benefit."
+      }
+    },
+    "guard_change_verified": {
+      "before": "ce_seq + 1 <= MaxSeq (needs room for 2 seqs)",
+      "after": "ce_seq <= MaxSeq (needs room for 1 seq)",
+      "assessment": "Correct. Matches CEProduceDirectEffect guard (spec:222). Single effect uses ce_seq, increments to ce_seq+1. ce_seq+1 can be MaxSeq+1 (the upper bound sentinel), which is within the ce_seq domain (spec:122 implies ce_seq in 1..(MaxSeq+1))."
+    },
+    "unchanged_clauses_verified": {
+      "CEProcessFill": "UNCHANGED clause identical to original. Correct.",
+      "CEProcessRecoveredPending": "UNCHANGED clause identical to original. Correct."
+    },
+    "backup_contiguity_verified": {
+      "assessment": "CEBackupApply expects next_expected = MaxOfSet(ce_backup_applied)+1. Currently fill produces seqs N, N+1 and backup applies both sequentially. After collapse, fill produces only seq N, next action produces N+1. Backup still applies N, N+1 in order. No gap introduced because ce_seq increments by 1 per effect and all effects are broadcast."
+    }
+  },
+  "issues_found": [],
+  "observations": [
+    {
+      "severity": "cosmetic",
+      "description": "Snapshot remains in CEEffectTypes (spec:16) as a dead type that is never produced. Proposer correctly notes this as out-of-scope cosmetic follow-up. Agree: removing it would touch the CONSTANTS section and is a separate change."
+    },
+    {
+      "severity": "informational",
+      "description": "The CEProduceDirectEffect exclusion set (spec:223) is CEEffectTypes \\ {MFR, Snapshot}. After this change, Snapshot is excluded but also never produced by any action. The exclusion is redundant for Snapshot but harmless."
+    }
+  ],
+  "structural_impact_assessment": {
+    "state_space_reduction": "Significant. Each fill-path step produces 1 effect instead of 2, halving the branching factor for fill-heavy workloads. This directly reduces TLC state space.",
+    "seq_space_benefit": "Real but bounded by MaxSeq being a model constant. In production reasoning, halving seq consumption for fills extends headroom.",
+    "complexity_reduction": "Guard simplification from ce_seq+1<=MaxSeq to ce_seq<=MaxSeq aligns fill actions with direct-effect actions, removing a structural asymmetry."
+  }
+}

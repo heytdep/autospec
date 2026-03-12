@@ -1,0 +1,49 @@
+{
+  "run_id": "sample_run",
+  "step": 12,
+  "compartment": "C2",
+  "timestamp": "2026-03-10T10:55:00Z",
+  "status": "OK",
+  "proposal": {
+    "technique": "T007",
+    "technique_name": "action merging",
+    "target_actions": [
+      "ReplicateEntry",
+      "AckEntry"
+    ],
+    "claim": "local self-replication is instantaneous, merge replicate+ack for local case",
+    "structural_delta": "state space: remove intermediate state for local self-replication",
+    "diff": "...merged local case..."
+  },
+  "review": {
+    "verdict": "APPROVE",
+    "argument": "local path has no network delay, intermediate state unobservable"
+  },
+  "judgment": {
+    "ruling": "ACCEPT",
+    "reasoning": "clear merge candidate for local case"
+  },
+  "hard_gate": {
+    "ran": true,
+    "passed": true,
+    "verifier": "TLC",
+    "state_space_before": 35800,
+    "state_space_after": 31200,
+    "properties_checked": [
+      "LogMatching",
+      "LeaderCompleteness",
+      "StateMachineSafety"
+    ],
+    "counterexample": null
+  },
+  "structural_verification": {
+    "ran": true,
+    "claim_substantiated": true,
+    "evidence": "local self-replication now atomic"
+  },
+  "failure_reason": null,
+  "technique_registry_update": {
+    "action": "updated",
+    "technique_id": "T007"
+  }
+}

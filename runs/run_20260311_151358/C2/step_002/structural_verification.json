@@ -1,0 +1,56 @@
+{
+  "claim": "OBReceiveMFR lacks CE session validation, allowing stale MFRs to be consumed after CE view change",
+  "claim_substantiated": true,
+  "evidence": {
+    "original_gap": {
+      "action": "OBReceiveMFR",
+      "file": "spec.tla",
+      "lines": "391-405",
+      "finding": "Guard is /\\ msg.market = m only. No session field on msg is checked. Any msg in msgs_ce_to_ob matching the market is consumable regardless of CE session.",
+      "snippet": "/\\ \\E msg \\in msgs_ce_to_ob :\n    /\\ msg.market = m\n    /\\ LET eff == [type |-> \"CEFinalization\", ...]"
+    },
+    "stale_mfrs_persist": {
+      "action": "CEViewChange",
+      "file": "spec.tla",
+      "lines": "321-322",
+      "finding": "CEViewChange UNCHANGED clause lists msgs_ce_to_ob explicitly, confirming that CE view change does not flush or modify the CE-to-OB message channel. MFRs from the old session remain in msgs_ce_to_ob after view change.",
+      "snippet": "/\\ UNCHANGED <<ce_checkpoint_seq,\n               msgs_ce_broadcast, msgs_ce_to_ob, msgs_ob_to_ce, msgs_ob_broadcast,\n               obVars, omsVars, cacheVars, archiverVars, obBackupVars>>"
+    },
+    "fix_session_guard": {
+      "action": "OBReceiveMFR",
+      "file": "spec_modified.tla",
+      "line": 398,
+      "finding": "Modified spec adds /\\ msg.session = ob_cached_ce_session[m] as a conjunct in the existential guard. After CE view change updates ob_cached_ce_session[m] to the new session, stale session-1 MFRs no longer satisfy the guard and cannot be consumed.",
+      "snippet": "/\\ msg.session = ob_cached_ce_session[m]"
+    },
+    "fix_session_cache_update": {
+      "action": "DownstreamOBReceiveCEViewChange",
+      "file": "spec_modified.tla",
+      "line": 587,
+      "finding": "Modified spec adds /\\ ob_cached_ce_session' = [ob_cached_ce_session EXCEPT ![m] = vc.session] inside the existential block alongside the existing ob_cached_ce_ts update. When OB receives the CE view change message, it atomically advances both its cached timestamp and its cached session. This is what advances ob_cached_ce_session[m] from 1 to 2, after which the session gate in OBReceiveMFR only admits new-session MFRs.",
+      "snippet": "/\\ ob_cached_ce_session' = [ob_cached_ce_session EXCEPT ![m] = vc.session]"
+    },
+    "variable_coverage": {
+      "finding": "ob_cached_ce_session is added to cacheVars (line 104 of modified spec). All actions using UNCHANGED <<..., cacheVars, ...>> automatically preserve ob_cached_ce_session. The two actions that individually enumerate cache variables (DownstreamOMSReceiveCEViewChange line 601, DownstreamOMSReceiveOBViewChange line 621) have ob_cached_ce_session added to their UNCHANGED clauses explicitly, ensuring no frame-condition gap.",
+      "new_cacheVars": "cacheVars == <<ob_cached_ce_ts, ob_cached_ce_session, oms_cached_ce_ts, oms_cached_ob_ts>>"
+    },
+    "init_coupling": {
+      "finding": "ob_cached_ce_session = [m \\in Markets |-> 1] in Init (line 187 of modified spec) matches ce_primary = 1 (line 164 of original). This coupling is required: without a view change having fired, ob_cached_ce_session[m] = 1 allows initial CE session MFRs through the guard.",
+      "init_ce_primary": "ce_primary = 1",
+      "init_ob_cached_ce_session": "ob_cached_ce_session = [m \\in Markets |-> 1]"
+    }
+  },
+  "attack_trace": [
+    "1. CE session=1 produces Fill, sends MFR to msgs_ce_to_ob with session=1 (spec.tla line ~244)",
+    "2. CE crashes (CECrash, spec.tla line ~289) before OB consumes the MFR",
+    "3. CE view change: new session=2, some effects rolled back (CEViewChange, spec.tla line ~298); msgs_ce_to_ob UNCHANGED, so session=1 MFR persists",
+    "4. OBReceiveMFR(m) fires in original spec: msg.market=m matches, no session check, stale session=1 MFR consumed",
+    "5. OB sequences phantom CEFinalization referencing a fill CE rolled back"
+  ],
+  "fix_blocks_trace": [
+    "4'. After CE VC, OB has not yet processed DownstreamOBReceiveCEViewChange, so ob_cached_ce_session[m]=1",
+    "4''. Once OB processes DownstreamOBReceiveCEViewChange: ob_cached_ce_session[m] set to 2",
+    "4'''. OBReceiveMFR guard: msg.session=1 != ob_cached_ce_session[m]=2 -> predicate false -> action disabled",
+    "5'. Stale MFR is blocked; only new session=2 MFRs (produced after CE recovery) can be consumed"
+  ]
+}

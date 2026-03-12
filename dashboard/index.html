@@ -1,0 +1,157 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>AutoSpec Dashboard</title>
+  <link rel="stylesheet" href="style.css?v=3">
+</head>
+<body>
+  <header>
+    <h1>AutoSpec</h1>
+    <div class="header-controls">
+      <select id="run-select"><option value="">select run...</option></select>
+      <span id="run-status" class="status-badge"></span>
+      <button id="refresh-btn" title="refresh">&#x21bb;</button>
+    </div>
+  </header>
+
+  <nav>
+    <button class="tab active" data-tab="overview">Overview</button>
+    <button class="tab" data-tab="progress">Progress</button>
+    <button class="tab" data-tab="journals">Journals</button>
+    <button class="tab" data-tab="evolution">Spec Evolution</button>
+    <button class="tab" data-tab="techniques">Techniques</button>
+    <button class="tab" data-tab="agents">Live Agents</button>
+  </nav>
+
+  <!-- OVERVIEW -->
+  <section id="tab-overview" class="tab-content active">
+    <svg id="overview-graph" viewBox="0 0 800 350"></svg>
+    <div id="overview-agents"></div>
+  </section>
+
+  <!-- PROGRESS -->
+  <section id="tab-progress" class="tab-content">
+    <div id="progress-live-summary"></div>
+    <div class="metrics-row">
+      <div class="metric-card">
+        <div class="metric-value" id="m-total-steps">-</div>
+        <div class="metric-label">completed</div>
+      </div>
+      <div class="metric-card">
+        <div class="metric-value" id="m-in-progress" style="color:var(--accent)">-</div>
+        <div class="metric-label">in progress</div>
+      </div>
+      <div class="metric-card">
+        <div class="metric-value ok" id="m-ok-steps">-</div>
+        <div class="metric-label">OK</div>
+      </div>
+      <div class="metric-card">
+        <div class="metric-value fail" id="m-fail-steps">-</div>
+        <div class="metric-label">FAIL</div>
+      </div>
+      <div class="metric-card">
+        <div class="metric-value" id="m-techniques">-</div>
+        <div class="metric-label">techniques</div>
+      </div>
+      <div class="metric-card">
+        <div class="metric-value novel" id="m-novel">-</div>
+        <div class="metric-label">novel</div>
+      </div>
+    </div>
+    <div class="chart-row">
+      <div class="chart-card">
+        <h3>State Space Trajectory</h3>
+        <svg id="chart-state-space" viewBox="0 0 600 250"></svg>
+      </div>
+      <div class="chart-card">
+        <h3>Step Outcomes</h3>
+        <svg id="chart-outcomes" viewBox="0 0 600 250"></svg>
+      </div>
+    </div>
+    <div class="chart-row">
+      <div class="chart-card wide">
+        <h3>Structural Improvements Timeline</h3>
+        <div id="timeline-improvements"></div>
+      </div>
+    </div>
+  </section>
+
+  <!-- JOURNALS -->
+  <section id="tab-journals" class="tab-content">
+    <div class="filter-bar">
+      <select id="journal-compartment-filter">
+        <option value="">all compartments</option>
+      </select>
+      <select id="journal-status-filter">
+        <option value="">all statuses</option>
+        <option value="OK">OK</option>
+        <option value="FAIL">FAIL</option>
+      </select>
+      <select id="journal-technique-filter">
+        <option value="">all techniques</option>
+      </select>
+      <label class="toggle">
+        <input type="checkbox" id="journal-show-checkpoints"> show checkpoints
+      </label>
+    </div>
+    <div id="journal-list"></div>
+    <div id="journal-detail" class="detail-panel hidden"></div>
+    <div id="checkpoint-list" class="hidden"></div>
+  </section>
+
+  <!-- SPEC EVOLUTION -->
+  <section id="tab-evolution" class="tab-content">
+    <div class="evolution-controls">
+      <button id="evo-prev" disabled>&larr; prev</button>
+      <span id="evo-step-label">step 0</span>
+      <button id="evo-next" disabled>next &rarr;</button>
+      <input type="range" id="evo-slider" min="0" max="0" value="0">
+    </div>
+    <div class="evolution-layout">
+      <svg id="compartment-graph" viewBox="0 0 700 400"></svg>
+      <div id="evo-detail" class="detail-panel">
+        <p class="placeholder">select a step to see changes</p>
+      </div>
+    </div>
+  </section>
+
+  <!-- TECHNIQUES -->
+  <section id="tab-techniques" class="tab-content">
+    <div class="filter-bar">
+      <select id="tech-class-filter">
+        <option value="">all classes</option>
+        <option value="known">known</option>
+        <option value="candidate-novel">candidate-novel</option>
+        <option value="novel">novel</option>
+      </select>
+    </div>
+    <table id="techniques-table">
+      <thead>
+        <tr>
+          <th>id</th>
+          <th>name</th>
+          <th>class</th>
+          <th>optimizes</th>
+          <th>applications</th>
+          <th>success rate</th>
+          <th>source</th>
+        </tr>
+      </thead>
+      <tbody></tbody>
+    </table>
+    <div id="technique-detail" class="detail-panel hidden"></div>
+  </section>
+
+  <!-- LIVE AGENTS -->
+  <section id="tab-agents" class="tab-content">
+    <div id="live-header"></div>
+    <div id="live-compartments"></div>
+    <div id="live-feed-header">activity feed</div>
+    <div id="live-feed"></div>
+  </section>
+
+  <script src="app.js?v=5"></script>
+</body>
+</html>

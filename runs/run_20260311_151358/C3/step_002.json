@@ -1,0 +1,58 @@
+{
+  "compartment": "C3",
+  "step": 2,
+  "status": "FAIL",
+  "failure_reason": "D209 archiver ingest unification rejected: WF over unified nondeterministic action does not guarantee backup branch fires. Backup path can be starved when broadcast keeps action enabled. Breaks DA liveness argument behind P18.",
+  "technique": "D209",
+  "technique_name": "uniform effect log pattern across heterogeneous services",
+  "target_actions": ["ArchiverIngestCE", "ArchiverIngestCEFromBackup"],
+  "proposal_summary": "Unify ArchiverIngestCE and ArchiverIngestCEFromBackup into a single action with a disjunctive source set (msgs_ce_broadcast union backup-held log), eliminating one action definition and one fairness conjunct WF_vars(ArchiverIngestCEFromBackup(a)).",
+  "review_verdict": "REJECT",
+  "review_core_finding": "Dropping WF_vars(ArchiverIngestCEFromBackup(a)) (spec line 835) removes an independent liveness guarantee. The original two-WF structure guarantees each path fires eventually when independently enabled. WF on the unified disjunctive action only guarantees the action fires when its disjunctive precondition holds; it does not guarantee the backup branch is ever selected. When msgs_ce_broadcast is perpetually non-empty, the scheduler can always select from broadcast and starve the backup path indefinitely.",
+  "reviewer_objections": [
+    {
+      "objection": "WF_vars(ArchiverIngestCE(a)) on a nondeterministic action does not distribute to WF on each internal choice branch. The backup ingest path can be permanently starved.",
+      "ruling": "sustained",
+      "evidence": "TLA+ semantics: WF_vars(A) means if A is continuously enabled, A eventually fires. For the unified action, enabledness is satisfied when EITHER source is non-empty. If msgs_ce_broadcast never drains, WF forces the unified action to fire but the nondeterministic choice permits always picking from broadcast. The separate WF_vars(ArchiverIngestCEFromBackup(a)) in the original spec (line 835) closes this by making the backup action independently guaranteed.",
+      "spec_lines": "834-835"
+    },
+    {
+      "objection": "P18 DA liveness is broken: after LoseCEBroadcast (lines 721-724), archivers must eventually read from backup path; without independent WF, a schedule exists where backup-applied effects never reach any archiver.",
+      "ruling": "sustained",
+      "evidence": "LoseCEBroadcast empties msgs_ce_broadcast. After this event, the unified source set contains only backup-held effects. WF forces the unified action to eventually fire in this window. But if broadcast keeps refilling before LoseCEBroadcast drains it completely, the archiver may never have processed backup-applied effects at the critical moment. Independent WF on backup action ensures eventual archival regardless of broadcast state."
+    }
+  ],
+  "judgment_ruling": "REJECT",
+  "judgment_key_finding": "The proposer's claim that 'the single WF_vars(ArchiverIngestCE(a)) now covers both sources' is incorrect under TLA+ semantics. WF(A) where A has nondeterministic internal choice does not imply WF on each branch. WF(A \\/ B) does not imply WF(A) /\\ WF(B). This is a well-known TLA+ pitfall. The original two-action structure with independent WF conjuncts is correct and should be retained.",
+  "hard_gate": {
+    "ran": false,
+    "passed": false
+  },
+  "structural_verification": {
+    "ran": false,
+    "claim_substantiated": false
+  },
+  "technique_registry_update": {
+    "action": "failure_recorded",
+    "technique_id": "D209"
+  },
+  "proposal": {
+    "technique": "D209",
+    "technique_name": "uniform effect log pattern across heterogeneous services",
+    "target_actions": ["ArchiverIngestCE", "ArchiverIngestCEFromBackup"],
+    "claim": "Unify into a single ArchiverIngestCE with disjunctive source (broadcast OR backup-held log). Eliminates redundant action definition and one fairness conjunct. Correct because stored record shape is identical in both paths.",
+    "diff_summary": "Replace two separate archiver ingest actions with one unified action using source set = msgs_ce_broadcast union {e in ce_log : e.seq in ce_backup_applied} (guarded by ce_backup_alive). Remove WF_vars(ArchiverIngestCEFromBackup(a)) fairness conjunct."
+  },
+  "review": {
+    "verdict": "reject",
+    "critical_issue": "fairness_weakening",
+    "description": "Dropping WF_vars(ArchiverIngestCEFromBackup(a)) weakens the liveness guarantee. The nondeterministic choice over the union means the scheduler can always select from broadcast source and starve backup path. Original spec has two independent WF conjuncts guaranteeing each path fires independently.",
+    "affected_properties": ["P18"]
+  },
+  "judgment": {
+    "verdict": "reject",
+    "ruling": "reviewer_sustained",
+    "tla_semantics_note": "WF on action with nondeterministic internal choice does not distribute into WF on each choice branch. This is a foundational TLA+ semantic constraint, not a spec-specific concern.",
+    "salvage_path": "Define separate sub-actions ArchiverIngestCEBroadcast(a) and ArchiverIngestCEBackup(a) each with their own WF conjunct, optionally wrapped in ArchiverIngestCE for Next. However this defeats unification purpose. Retaining original two-action structure is cleaner."
+  }
+}

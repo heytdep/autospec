@@ -1,0 +1,26 @@
+{
+  "state": "completed",
+  "current_step": 5,
+  "started": "2026-03-11T15:13:58Z",
+  "config": {
+    "P": 5,
+    "S": 3,
+    "F": 5,
+    "M": 3
+  },
+  "active_agents": [],
+  "escalation": {
+    "C1": {
+      "consecutive_no_progress": 2,
+      "tier": 0
+    },
+    "C2": {
+      "consecutive_no_progress": 0,
+      "tier": 0
+    },
+    "C3": {
+      "consecutive_no_progress": 0,
+      "tier": 0
+    }
+  }
+}

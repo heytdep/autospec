@@ -1,0 +1,990 @@
+{
+  "run_id": "run_20260311_151358",
+  "spec": "/tmp/formal-spec-1773177791/spec.tla",
+  "seeded_at": "2026-03-11",
+  "techniques": [
+    {
+      "id": "D001",
+      "name": "quorum intersection exploitation",
+      "class": "known",
+      "source": {
+        "type": "paper",
+        "ref": "Lamport, Paxos Made Simple, 2001"
+      },
+      "description": "reduce the number of quorums or quorum checks by exploiting the fact that any two quorums of size > n/2 share at least one member",
+      "optimizes": [
+        "round complexity",
+        "message count"
+      ],
+      "preconditions": [
+        "protocol uses majority quorums",
+        "two phases both require quorum agreement"
+      ],
+      "trust_requirements": [
+        "honest majority (> n/2)"
+      ],
+      "generalized_form": "if phase A collects a quorum Q_A and phase B collects a quorum Q_B, and both are majority quorums, then Q_A and Q_B share at least one member. any property established by Q_A is visible to Q_B through the intersection, potentially eliminating an explicit transfer step.",
+      "applications": [],
+      "known_failures": [],
+      "related_techniques": [],
+      "verification_trail": null,
+      "applicability_notes": "low: spec uses single-primary-per-scope with one backup, not quorum voting. no majority quorum structure present in CE/OB/OMS."
+    },
+    {
+      "id": "D002",
+      "name": "fast path optimization",
+      "class": "known",
+      "source": {
+        "type": "paper",
+        "ref": "Lamport, Fast Paxos, 2006"
+      },
+      "description": "skip a protocol phase when a supermajority (e.g. 3/4) agrees, falling back to the normal path otherwise",
+      "optimizes": [
+        "latency",
+        "round complexity"
+      ],
+      "preconditions": [
+        "protocol has at least 2 phases",
+        "a supermajority threshold exists where the extra phase is provably unnecessary"
+      ],
+      "trust_requirements": [
+        "supermajority availability for the fast path"
+      ],
+      "generalized_form": "if a phase exists only to resolve conflicts, and a larger quorum guarantees no conflict can exist, skip that phase when the larger quorum responds. maintain the slow path as fallback.",
+      "applications": [],
+      "known_failures": [],
+      "related_techniques": [],
+      "verification_trail": null,
+      "applicability_notes": "low: spec is single-primary replication, not multi-phase voting. no supermajority structure to exploit."
+    },
+    {
+      "id": "D003",
+      "name": "speculative execution",
+      "class": "known",
+      "source": {
+        "type": "paper",
+        "ref": "Kotla et al., Zyzzyva, 2007"
+      },
+      "description": "execute operations speculatively before full commit, rolling back if the speculation proves wrong",
+      "optimizes": [
+        "latency",
+        "throughput"
+      ],
+      "preconditions": [
+        "operations are deterministic",
+        "rollback is possible and cheap",
+        "speculation is correct in the common case"
+      ],
+      "trust_requirements": [
+        "depends on the rollback mechanism"
+      ],
+      "generalized_form": "if a replica can predict the outcome of a pending decision with high probability, execute the operation before the decision is final. maintain a rollback log. if the prediction is wrong (rare), roll back and re-execute.",
+      "applications": [],
+      "known_failures": [],
+      "related_techniques": [],
+      "verification_trail": null,
+      "applicability_notes": "medium: OB buffers fills in ob_pending_log before CE confirmation (pending_seq namespace). this is already a form of speculative buffering. question is whether OB can speculatively apply pending fills before MFR arrives from CE."
+    },
+    {
+      "id": "D004",
+      "name": "request batching",
+      "class": "known",
+      "source": {
+        "type": "paper",
+        "ref": "various, standard practice"
+      },
+      "description": "batch multiple client requests into a single consensus instance to amortize per-instance overhead",
+      "optimizes": [
+        "throughput",
+        "message count per request"
+      ],
+      "preconditions": [
+        "requests are independent or can be ordered deterministically within a batch",
+        "batch size bounded to prevent latency spikes"
+      ],
+      "trust_requirements": [
+        "none"
+      ],
+      "generalized_form": "if the protocol runs one consensus instance per request, and instance overhead is O(n) messages, batch k requests into one instance. per-request cost drops from O(n) to O(n/k). tradeoff: latency increases by batch fill time.",
+      "applications": [],
+      "known_failures": [],
+      "related_techniques": [
+        "D210"
+      ],
+      "verification_trail": null,
+      "applicability_notes": "high: spec effects are individually sequenced (seq field). batching multiple effects per broadcast message is directly applicable without changing protocol semantics."
+    },
+    {
+      "id": "D005",
+      "name": "consensus pipelining",
+      "class": "known",
+      "source": {
+        "type": "paper",
+        "ref": "various, e.g. EPaxos, Raft optimizations"
+      },
+      "description": "overlap consecutive consensus instances so that instance N+1 begins before instance N completes",
+      "optimizes": [
+        "throughput",
+        "effective latency"
+      ],
+      "preconditions": [
+        "instances are independent or have well-defined ordering",
+        "the protocol can handle out-of-order completion"
+      ],
+      "trust_requirements": [
+        "none beyond base protocol"
+      ],
+      "generalized_form": "if consensus instances are sequential and each takes R rounds, pipeline up to P instances so that P instances complete in R + P - 1 rounds instead of P * R rounds.",
+      "applications": [],
+      "known_failures": [],
+      "related_techniques": [],
+      "verification_trail": null,
+      "applicability_notes": "medium: CE produces effects sequentially (ce_seq increments monotonically). pipelining CE effect production before backup acknowledgment could increase throughput. spec currently does not require backup ack before next effect."
+    },
+    {
+      "id": "D006",
+      "name": "view change log merging",
+      "class": "known",
+      "source": {
+        "type": "paper",
+        "ref": "Ongaro & Ousterhout, Raft, 2014; Liskov & Cowling, VR Revisited, 2012"
+      },
+      "description": "during view change, the new leader merges logs from a quorum to determine the authoritative log suffix, instead of requesting the full log from every replica",
+      "optimizes": [
+        "view change communication",
+        "view change latency"
+      ],
+      "preconditions": [
+        "logs are prefix-consistent (common prefix + divergent suffix)",
+        "quorum intersection guarantees the committed prefix is present in every quorum"
+      ],
+      "trust_requirements": [
+        "quorum intersection"
+      ],
+      "generalized_form": "if replicas have prefix-consistent logs and only the suffix diverges, the new leader needs only the suffix from a quorum (not the full log from all replicas). committed entries are in every quorum by intersection, so only uncommitted entries need reconciliation.",
+      "applications": [],
+      "known_failures": [
+        {
+          "run": "run_20260311_151358",
+          "step": 1,
+          "compartment": "C1",
+          "reason": "ce_checkpoint_seq persists across view changes, MAX anchor exceeds new session range causing sequence gap"
+        }
+      ],
+      "related_techniques": [
+        "D201"
+      ],
+      "verification_trail": null,
+      "applicability_notes": "high: CEViewChange already implements this via anchor + MaxContiguousFrom(anchor+1, archiver_seqs). the archiver acts as the log source. optimization question: can the merge be made cheaper or the anchor computed more precisely?"
+    },
+    {
+      "id": "D007",
+      "name": "uncertified DAG commit via pattern matching",
+      "class": "known",
+      "source": {
+        "type": "research-notes",
+        "ref": "~/projects/my-research/learnings/distributed-systems/dag-consensus/narwhal-tusk-and-successors.md:107-142"
+      },
+      "description": "skip certificate collection entirely and derive commit decisions from DAG reference patterns alone",
+      "optimizes": [
+        "latency",
+        "message complexity",
+        "protocol simplicity"
+      ],
+      "preconditions": [
+        "DAG topology is sufficiently dense",
+        "commit rule is locally verifiable from DAG structure alone"
+      ],
+      "trust_requirements": [
+        "honest majority (standard BFT)"
+      ],
+      "generalized_form": "if a protocol collects certificates before committing, and the same availability guarantee can be inferred from DAG structure, skip certificate collection.",
+      "applications": [],
+      "known_failures": [],
+      "related_techniques": [
+        "D002",
+        "D005"
+      ],
+      "verification_trail": null,
+      "applicability_notes": "low: spec is not a DAG protocol. CE/OB/OMS use linear logs with single leader."
+    },
+    {
+      "id": "D008",
+      "name": "authority-endorsed monotonic leader transitions",
+      "class": "known",
+      "source": {
+        "type": "research-notes",
+        "ref": "~/projects/my-research/learnings/distributed-systems/replication-and-ordering/tplus-downstream-domain-facts.md:19-24; ~/projects/tplus-stuff/notion-management/content/in-progress/pages/docs/downstream-distributed-ordering-architecture.md:115-117"
+      },
+      "description": "require external authority endorsement (signature + strictly-increasing timestamp) for leader transitions, preventing phantom leaders without requiring consensus among downstream services",
+      "optimizes": [
+        "split-brain prevention",
+        "leader transition simplicity"
+      ],
+      "preconditions": [
+        "external authority can reliably produce monotonic timestamps",
+        "downstream nodes can verify authority signatures",
+        "all leadership transitions must carry strictly fresher timestamp than cached"
+      ],
+      "trust_requirements": [
+        "external authority integrity"
+      ],
+      "generalized_form": "if leader L broadcasts leadership claim, downstream D caches (leader_id, authority_timestamp). a new claim from L' is accepted only if authority_timestamp' > authority_timestamp and authority_signature is valid.",
+      "applications": [],
+      "known_failures": [],
+      "related_techniques": [
+        "D104"
+      ],
+      "verification_trail": null,
+      "applicability_notes": "directly instantiated: ce_authority_ts, ob_authority_ts, oms_authority_ts are all authority timestamps. ob_cached_ce_ts and oms_cached_ce_ts implement the downstream caching pattern. already exploited; analysis should check whether all downstream rejection conditions are correctly implemented."
+    },
+    {
+      "id": "D009",
+      "name": "deterministic leader assignment via directory iteration",
+      "class": "known",
+      "source": {
+        "type": "conversation",
+        "ref": "~/projects/tplus-stuff/notion-management/content/in-progress/pages/docs/downstream-distributed-ordering-architecture.md:54"
+      },
+      "description": "assign leaders deterministically by iterating over a registered operator map, eliminating election consensus overhead entirely",
+      "optimizes": [
+        "election complexity",
+        "leader assignment latency"
+      ],
+      "preconditions": [
+        "operator set is registered and known to all participants",
+        "deterministic tie-breaking rule exists",
+        "single leader per resource scope"
+      ],
+      "trust_requirements": [
+        "directory/registry integrity"
+      ],
+      "generalized_form": "if leader election requires a consensus round and the operator set is stable and known, replace election with deterministic iteration: leader(scope) = operators[hash(scope) % len(operators)].",
+      "applications": [],
+      "known_failures": [],
+      "related_techniques": [],
+      "verification_trail": null,
+      "applicability_notes": "medium: CEViewChange increments ce_primary (session counter) deterministically without election. this pattern is already applied but could be made more explicit or extended to OB/OMS scope assignment."
+    },
+    {
+      "id": "D010",
+      "name": "N-way independent path attestation for censorship attribution",
+      "class": "known",
+      "source": {
+        "type": "conversation",
+        "ref": "~/projects/tplus-stuff/notion-management/content/in-progress/pages/docs/multi-path-corroboration-for-censorship-resistance.md:40-51"
+      },
+      "description": "route messages through N independent attested relays to make censorship attributable",
+      "optimizes": [
+        "censorship attribution",
+        "accountability without trusted intermediary"
+      ],
+      "preconditions": [
+        "N independent relays available",
+        "relays produce send/receive attestation certificates",
+        "N is large enough relative to expected collusion threshold"
+      ],
+      "trust_requirements": [
+        "relay attestation integrity",
+        "at least one honest relay in the N paths"
+      ],
+      "generalized_form": "with N independent paths all carrying TEE-attested send certificates, if all N fail: P(N independent operators all collude) is negligible for large N.",
+      "applications": [],
+      "known_failures": [],
+      "related_techniques": [],
+      "verification_trail": null,
+      "applicability_notes": "low: spec does not model relay networks or censorship attribution. archiver redundancy (f+1) is a simpler availability guarantee."
+    },
+    {
+      "id": "D101",
+      "name": "non-equivocation elimination",
+      "class": "known",
+      "source": {
+        "type": "paper",
+        "ref": "Chun et al., Attested Append-Only Memory, 2007; Levin et al., TrInc, 2009"
+      },
+      "description": "remove protocol mechanisms that exist solely to detect or prevent equivocation, since TEE attestation already prevents it",
+      "optimizes": [
+        "protocol complexity",
+        "message size",
+        "round count"
+      ],
+      "preconditions": [
+        "all relevant nodes run in TEE",
+        "TEE provides non-equivocation guarantee (monotonic counters or attested append-only memory)"
+      ],
+      "trust_requirements": [
+        "TEE non-equivocation"
+      ],
+      "generalized_form": "for each mechanism M in the protocol, check if M exists to detect equivocation. if TEE already prevents equivocation, M is redundant. remove M, verify properties still hold.",
+      "applications": [],
+      "known_failures": [
+        {
+          "run": "run_20260311_151358",
+          "step": 2,
+          "compartment": "C1",
+          "reason": "Out-of-order backup application breaks ArchiverGCByAcks which depends on MaxOfSet(backup_applied) being a contiguous prefix for safe GC. Gap seqs lost when broadcast+backup fail after GC."
+        }
+      ],
+      "related_techniques": [],
+      "verification_trail": null,
+      "applicability_notes": "high: trust model explicitly notes TEE non-equivocation (D101 applicable). spec uses session numbers to detect stale messages from demoted leaders. question: are there additional mechanisms in the spec that exist only to handle equivocation that TEE already prevents?"
+    },
+    {
+      "id": "D102",
+      "name": "signature elimination under attestation",
+      "class": "known",
+      "source": {
+        "type": "paper",
+        "ref": "TEE consensus literature, e.g. MinBFT, CheapBFT"
+      },
+      "description": "replace per-message signatures with TEE attestation, since the TEE guarantees message authenticity",
+      "optimizes": [
+        "message size",
+        "computation cost",
+        "protocol complexity"
+      ],
+      "preconditions": [
+        "sender runs in TEE",
+        "TEE attestation proves message origin",
+        "receiver can verify TEE attestation"
+      ],
+      "trust_requirements": [
+        "TEE attestation"
+      ],
+      "generalized_form": "if a protocol uses signatures to prove message authenticity, and the sender runs in a TEE that attests all outgoing messages, the signature is redundant. remove signatures, replace with attestation checks where needed.",
+      "applications": [],
+      "known_failures": [],
+      "related_techniques": [
+        "D108"
+      ],
+      "verification_trail": null,
+      "applicability_notes": "high: trust model explicitly notes D102 applicable. spec models session numbers as implicit sender identity. question: are there explicit signature fields or signature-checking steps in the spec that could be eliminated?"
+    },
+    {
+      "id": "D103",
+      "name": "Byzantine-to-crash fault model reduction",
+      "class": "known",
+      "source": {
+        "type": "paper",
+        "ref": "Veronese et al., MinBFT, 2013; Kapitza et al., CheapBFT, 2012"
+      },
+      "description": "when all nodes run in TEE, reduce the fault model from Byzantine to crash-fault, since TEE prevents arbitrary behavior",
+      "optimizes": [
+        "replication factor",
+        "quorum size",
+        "message complexity"
+      ],
+      "preconditions": [
+        "all protocol participants run in TEE",
+        "TEE prevents arbitrary code execution",
+        "TEE provides non-equivocation"
+      ],
+      "trust_requirements": [
+        "TEE code integrity",
+        "TEE non-equivocation"
+      ],
+      "generalized_form": "if a protocol assumes Byzantine faults and requires 3f+1 replicas, but all replicas run in TEE, reduce from 3f+1 to 2f+1 replicas and simplify all quorum thresholds accordingly.",
+      "applications": [],
+      "known_failures": [],
+      "related_techniques": [],
+      "verification_trail": null,
+      "applicability_notes": "already applied: trust model explicitly states 'Byzantine-to-crash reduction already applied (D103 already exploited)'. spec uses crash-only fault model throughout. no further reduction available."
+    },
+    {
+      "id": "D104",
+      "name": "trusted monotonic counter exploitation",
+      "class": "known",
+      "source": {
+        "type": "paper",
+        "ref": "Levin et al., TrInc, 2009"
+      },
+      "description": "use TEE-provided monotonic counters to enforce ordering and prevent replay without protocol-level mechanisms",
+      "optimizes": [
+        "protocol complexity",
+        "replay protection overhead"
+      ],
+      "preconditions": [
+        "TEE provides a monotonic counter that cannot be rolled back",
+        "protocol has replay or ordering concerns"
+      ],
+      "trust_requirements": [
+        "TEE monotonic counter"
+      ],
+      "generalized_form": "if a protocol includes mechanisms to detect replayed messages or enforce ordering, and the TEE provides a monotonic counter, replace protocol-level ordering mechanisms with counter values.",
+      "applications": [
+        {
+          "run": "run_20260311_151358",
+          "step": 5,
+          "compartment": "C2",
+          "outcome": "OK",
+          "notes": "ob_authority_ts eliminated. Inductive equality ob_authority_ts = ob_primary trivially proven. Zero property surface (ob_authority_ts absent from all invariants except P1 type check). Clean state variable reduction: removes one per-market Nat from state vector."
+        }
+      ],
+      "known_failures": [
+        {
+          "run": "run_20260311_151358",
+          "step": 5,
+          "compartment": "C1",
+          "reason": "ce_authority_ts appears in P6/P17 as semantic constraint. VC message ts field would carry session value, creating semantic inconsistency. CE-only elimination without broader refactor (OB/OMS + VC message ts rename + INV6/INV17 rewrite) leaves spec worse."
+        }
+      ],
+      "related_techniques": [
+        "D008"
+      ],
+      "verification_trail": null,
+      "applicability_notes": "high: authority_ts fields (ce_authority_ts, ob_authority_ts, oms_authority_ts) serve as monotonic counters for leader transitions. cached timestamps (ob_cached_ce_ts, oms_cached_ce_ts, oms_cached_ob_ts) implement the staleness rejection. question: could TEE-native counters replace the protocol-level authority_ts tracking?"
+    },
+    {
+      "id": "D105",
+      "name": "liveness attestation for adaptive quorums",
+      "class": "known",
+      "source": {
+        "type": "research-notes",
+        "ref": "autospec novel technique T008, generalized"
+      },
+      "description": "use TEE liveness attestation to dynamically adjust quorum sizes based on how many replicas are known to be alive",
+      "optimizes": [
+        "latency",
+        "fault tolerance flexibility"
+      ],
+      "preconditions": [
+        "TEE can attest replica liveness",
+        "quorum intersection property holds at the minimum adaptive quorum size"
+      ],
+      "trust_requirements": [
+        "TEE liveness attestation"
+      ],
+      "generalized_form": "if a protocol uses fixed quorum size Q, but TEE liveness attestation reveals k replicas are currently live, the effective quorum can be Q' = ceil((k+1)/2).",
+      "applications": [],
+      "known_failures": [],
+      "related_techniques": [],
+      "verification_trail": null,
+      "applicability_notes": "low: spec has no quorum structure. CE/OB/OMS each have one primary + one backup (not a quorum). liveness attestation not applicable in this topology."
+    },
+    {
+      "id": "D106",
+      "name": "VRF-free leader rotation via TEE confidentiality",
+      "class": "known",
+      "source": {
+        "type": "blog",
+        "ref": "~/projects/heytdep.github.io/drafts/33)--pub)--Diving into Leader Rotation Mechanisms for TEE-Backed Clusters.md:59-93"
+      },
+      "description": "replace VRF or SSLE-based leader election with deterministic selection inside TEE, where TEE confidentiality prevents external prediction of the next leader",
+      "optimizes": [
+        "cryptographic overhead",
+        "leader election latency",
+        "RNG requirements"
+      ],
+      "preconditions": [
+        "small permissioned quorum (typical n < 20)",
+        "TEE integrity and confidentiality already trusted",
+        "leader unpredictability is desired"
+      ],
+      "trust_requirements": [
+        "TEE confidentiality"
+      ],
+      "generalized_form": "if leader election uses cryptographic randomness to prevent prediction, and all nodes run in TEE, replace VRF with deterministic XOR-based tie-breaking on attested peer set.",
+      "applications": [],
+      "known_failures": [],
+      "related_techniques": [
+        "D102",
+        "D103"
+      ],
+      "verification_trail": null,
+      "applicability_notes": "medium: view changes in spec increment session counter deterministically (ce_primary + 1). no VRF in use. applicable if spec were extended to multi-candidate leader selection. currently limited scope."
+    },
+    {
+      "id": "D107",
+      "name": "asymmetric role specialization (TEE executors + untrusted collectors)",
+      "class": "known",
+      "source": {
+        "type": "blog",
+        "ref": "~/projects/heytdep.github.io/drafts/38)--pub)--TEEs for Trustless Complex Data Workflows For Blockchain Apps.md:92-96"
+      },
+      "description": "split system roles into untrusted collectors and TEE executors, reducing TEE infrastructure cost",
+      "optimizes": [
+        "infrastructure cost",
+        "TEE resource utilization"
+      ],
+      "preconditions": [
+        "safety-critical operations are separable from I/O-heavy operations",
+        "collectors can be verified by executors",
+        "collector failure is a liveness issue, not a safety issue"
+      ],
+      "trust_requirements": [
+        "TEE for executors only"
+      ],
+      "generalized_form": "split into: (1) collectors on untrusted hardware (networking, data gathering), (2) executors in TEE (state transitions, validation, signing). collector compromise affects liveness, not safety.",
+      "applications": [],
+      "known_failures": [],
+      "related_techniques": [],
+      "verification_trail": null,
+      "applicability_notes": "directly instantiated: archivers (non-TEE) = collectors; CE/OB/OMS (TEE) = executors. trust model explicitly states 'Archivers: non-TEE. Availability-only faults'. already fully exploited. analysis should verify the collector/executor boundary holds under all failure modes."
+    },
+    {
+      "id": "D108",
+      "name": "shared TEE key for light client verification amortization",
+      "class": "known",
+      "source": {
+        "type": "blog",
+        "ref": "~/projects/heytdep.github.io/drafts/31)--pub)--Understanding Helios and Exploring Light Clients' Affinity to TEEs.md:339-349"
+      },
+      "description": "use a shared signing key across all TEE replicas so light clients verify one bootstrap attestation quote instead of per-replica attestation",
+      "optimizes": [
+        "light client verification cost",
+        "attestation overhead"
+      ],
+      "preconditions": [
+        "all replicas run identical attested code",
+        "shared key distribution mechanism exists",
+        "light client trust model accepts 'any valid TEE replica'"
+      ],
+      "trust_requirements": [
+        "TEE code integrity across all replicas sharing the key"
+      ],
+      "generalized_form": "with a shared key derived from attested code hash, clients verify 1 quote and accept any message signed with the shared key. verification cost drops from O(n) to O(1).",
+      "applications": [],
+      "known_failures": [],
+      "related_techniques": [
+        "D102"
+      ],
+      "verification_trail": null,
+      "applicability_notes": "medium: spec does not model light clients explicitly, but downstream consumers (OB consuming CE effects, OMS consuming CE and OB effects) verify session/timestamp authenticity. shared key could amortize per-effect verification for downstream."
+    },
+    {
+      "id": "D109",
+      "name": "TEE-signed effect attribution for untrusted storage",
+      "class": "known",
+      "source": {
+        "type": "conversation",
+        "ref": "~/projects/tplus-stuff/notion-management/content/in-progress/pages/docs/unified-da-ordering-architecture.md:55-59"
+      },
+      "description": "sign each state mutation with TEE key over (sequence, session, hash(payload)), enabling untrusted archivers to store and serve effects without being able to forge, reorder, or tamper with them",
+      "optimizes": [
+        "storage trust requirements",
+        "archiver simplicity"
+      ],
+      "preconditions": [
+        "leader runs in TEE and signs all outputs",
+        "signature commits to sequence number",
+        "payloads are encrypted"
+      ],
+      "trust_requirements": [
+        "TEE signing key integrity"
+      ],
+      "generalized_form": "if effects are signed as sig(seq, session, H(payload)) by TEE, forgery is impossible, reordering is detectable, content is hidden. archivers need only be available, not trusted.",
+      "applications": [],
+      "known_failures": [],
+      "related_techniques": [
+        "D104"
+      ],
+      "verification_trail": null,
+      "applicability_notes": "high: spec effects carry (type, seq, session) fields. archivers are non-TEE. session field ties effect to specific primary (prevents cross-session forgery). question: does the spec commit seq into an authenticated field? recovery via CEArchiverSeqsForSession relies on session fidelity from untrusted archivers."
+    },
+    {
+      "id": "D201",
+      "name": "surgical rollback via per-action nonces",
+      "class": "known",
+      "source": {
+        "type": "research-notes",
+        "ref": "~/projects/my-research/learnings/distributed-systems/replication-and-ordering/tplus-downstream-domain-facts.md:11-17; ~/projects/tplus-stuff/notion-management/content/in-progress/pages/docs/downstream-distributed-system-architecture.md:81-121"
+      },
+      "description": "replace blanket state rollback during failover with precision rollback indexed by per-action nonces, only reverting the unrecovered tail of the action log",
+      "optimizes": [
+        "recovery time",
+        "wasted work during failover",
+        "rollback scope"
+      ],
+      "preconditions": [
+        "actions carry monotonic nonces or idempotency tokens",
+        "actions are independently replayable given correct ordering",
+        "recovery process can determine the maximal contiguous prefix of recovered actions"
+      ],
+      "trust_requirements": [
+        "recovered actions are authentic (signed or attested)"
+      ],
+      "generalized_form": "if a leader produces actions with monotonic nonces, and recovery finds the maximal contiguous prefix (a_1, ..., a_k), then only actions after a_k need rollback.",
+      "applications": [
+        {
+          "run": "run_20260311_151358",
+          "step": 1,
+          "compartment": "C2",
+          "outcome": "OK",
+          "notes": "Added ob_checkpoint_seq as fallback anchor in OBViewChange. MinOfTwo cap prevents cross-session staleness. Structural claim substantiated."
+        }
+      ],
+      "known_failures": [],
+      "related_techniques": [
+        "D006"
+      ],
+      "verification_trail": null,
+      "applicability_notes": "directly instantiated: CEViewChange computes anchor = max(backup_applied or checkpoint_seq), then recovered = MaxContiguousFrom(anchor+1, archiver_seqs). ce_seq restarts at recovered+1. this is surgical rollback. analysis should verify the anchor selection is always safe."
+    },
+    {
+      "id": "D202",
+      "name": "separation of data availability from replication",
+      "class": "known",
+      "source": {
+        "type": "research-notes",
+        "ref": "~/projects/my-research/learnings/distributed-systems/dag-consensus/narwhal-tusk-and-successors.md:1-12; ~/projects/tplus-stuff/notion-management/content/in-progress/pages/docs/unified-da-ordering-architecture.md:76-88"
+      },
+      "description": "decouple data availability from replication, allowing each to be optimized independently",
+      "optimizes": [
+        "throughput",
+        "recovery flexibility",
+        "architectural simplicity"
+      ],
+      "preconditions": [
+        "DA layer can store data independently of replica set",
+        "replicas can bootstrap from DA layer if all backups are lost",
+        "data is self-authenticating"
+      ],
+      "trust_requirements": [
+        "at least one DA node is available within recovery window"
+      ],
+      "generalized_form": "separate: backups exist for fast failover (hot standby), DA nodes exist for durability (cold archive). losing all backups loses speed, not data.",
+      "applications": [],
+      "known_failures": [],
+      "related_techniques": [
+        "D005"
+      ],
+      "verification_trail": null,
+      "applicability_notes": "directly instantiated: ce_backup_applied (hot replication) and ce_archiver_store (DA) are separate. CEViewChange uses archivers when backup is insufficient. trust model: 'f+1 redundancy: one honest archiver sufficient for recovery'."
+    },
+    {
+      "id": "D203",
+      "name": "separate sequence namespace for unvalidated actions",
+      "class": "known",
+      "source": {
+        "type": "conversation",
+        "ref": "~/projects/tplus-stuff/notion-management/content/in-progress/pages/docs/downstream-distributed-ordering-architecture.md:104"
+      },
+      "description": "use a dedicated monotonic counter for buffered unvalidated actions to avoid sequence ambiguity during recovery",
+      "optimizes": [
+        "recovery correctness",
+        "continued operation during validator outage"
+      ],
+      "preconditions": [
+        "service produces actions during periods when upstream validator is unavailable",
+        "recovery process must distinguish validated from unvalidated actions",
+        "normal sequence namespace is shared between validated and unvalidated entries"
+      ],
+      "trust_requirements": [
+        "none"
+      ],
+      "generalized_form": "introduce C' (separate counter) for the unvalidated stream. on recovery, the new upstream processes C'-sequenced actions as a clean, unambiguous batch.",
+      "applications": [],
+      "known_failures": [],
+      "related_techniques": [],
+      "verification_trail": null,
+      "applicability_notes": "directly instantiated: ob_pending_seq and ob_pending_log are separate from ob_seq and ob_log. PendingFill entries use pending_seq namespace. ob_archiver_pending stores pending actions separately from ob_archiver_store."
+    },
+    {
+      "id": "D204",
+      "name": "commutative state aggregation replacing linearizability",
+      "class": "known",
+      "source": {
+        "type": "research-notes",
+        "ref": "~/projects/my-research/learnings/distributed-systems/replication-and-ordering/tplus-downstream-domain-facts.md:56-62; ~/projects/tplus-stuff/notion-management/content/in-progress/pages/docs/downstream-distributed-ordering-architecture.md:209-212"
+      },
+      "description": "when state updates are cumulative and commutative, replace linearizable replication with eventual consistency via gossip",
+      "optimizes": [
+        "replication latency",
+        "coordination overhead",
+        "fault tolerance"
+      ],
+      "preconditions": [
+        "state updates form a commutative monoid",
+        "application tolerates transient inconsistency between replicas",
+        "view completeness matters more than ordering"
+      ],
+      "trust_requirements": [
+        "none beyond base protocol"
+      ],
+      "generalized_form": "for a set of state updates U, if apply order is irrelevant, replace linearizable replication with eventual consistency. final states converge once all updates are delivered.",
+      "applications": [],
+      "known_failures": [],
+      "related_techniques": [],
+      "verification_trail": null,
+      "applicability_notes": "medium: OMS aggregates effects from CE and OB into oms_log. oms_ce_cursor and oms_ob_cursor track per-source progress independently. OMS muting (oms_muted) prevents double-application. question: are OMS state aggregations commutative? if OB fills commute with CE snapshots, OMS replication could be relaxed."
+    },
+    {
+      "id": "D205",
+      "name": "broadcast replication for zero-latency failover",
+      "class": "known",
+      "source": {
+        "type": "conversation",
+        "ref": "~/projects/tplus-stuff/notion-management/content/in-progress/pages/docs/downstream-distributed-ordering-architecture.md:140-144"
+      },
+      "description": "broadcast all state mutations to all replicas regardless of primary/backup role, so that promotion is instantaneous",
+      "optimizes": [
+        "failover latency",
+        "promotion complexity"
+      ],
+      "preconditions": [
+        "state is small enough to replicate to all nodes",
+        "failover latency is more critical than bandwidth cost",
+        "role distinction only governs who serves requests, not who has state"
+      ],
+      "trust_requirements": [
+        "none"
+      ],
+      "generalized_form": "broadcast all mutations to all replicas. on failover, the new primary already has current state. promotion cost drops from O(state_size) catch-up to O(1) role reassignment.",
+      "applications": [
+        {
+          "run": "run_20260311_151358",
+          "step": 3,
+          "compartment": "C2",
+          "outcome": "OK",
+          "notes": "Found real liveness bug: OBViewChange doesn't re-tag/re-broadcast recovered effects with new session. OMS permanently stuck after OB view change. Fix: re-tag and re-broadcast."
+        }
+      ],
+      "known_failures": [],
+      "related_techniques": [],
+      "verification_trail": null,
+      "applicability_notes": "high: msgs_ce_broadcast is broadcast to all consumers (backup + OB + OMS). ce_backup_applied tracks what backup has received. CEViewChange anchors on ce_backup_applied if backup is alive. this is the broadcast replication pattern. failover speed depends on backup being current."
+    },
+    {
+      "id": "D206",
+      "name": "multi-source vector clocking with per-source cursors",
+      "class": "known",
+      "source": {
+        "type": "conversation",
+        "ref": "~/projects/tplus-stuff/notion-management/content/in-progress/pages/docs/downstream-distributed-ordering-architecture.md:149-151"
+      },
+      "description": "when multiple independent sources update the same entity, track a per-source timestamp cursor and reject updates older than that source's cursor",
+      "optimizes": [
+        "causal consistency",
+        "staleness prevention without global clock"
+      ],
+      "preconditions": [
+        "update streams from different sources are logically independent",
+        "each source has an independent monotonic timestamp",
+        "only same-source staleness is a concern"
+      ],
+      "trust_requirements": [
+        "sources provide monotonic timestamps"
+      ],
+      "generalized_form": "for entity E updated by sources {S_1, ..., S_k}, maintain cursor vector [t_1, ..., t_k]. when update from S_i arrives with timestamp t: if t <= t_i, reject (stale). else accept and set t_i = t.",
+      "applications": [
+        {
+          "run": "run_20260311_151358",
+          "step": 2,
+          "compartment": "C2",
+          "outcome": "OK",
+          "notes": "Added ob_cached_ce_session to gate OBReceiveMFR against stale MFRs from rolled-back CE sessions. Fixes semantic gap where phantom CEFinalization could be produced for rolled-back fills."
+        },
+        {
+          "run": "run_20260311_151358",
+          "step": 4,
+          "compartment": "C2",
+          "outcome": "OK",
+          "notes": "Added ob_session echo in CEProcessFill MFR message + guard in OBReceiveMFR. Prevents phantom CEFinalization from stale OB session fills after OBViewChange."
+        },
+        {
+          "run": "run_20260311_151358",
+          "step": 5,
+          "compartment": "C3",
+          "outcome": "OK",
+          "notes": "INV11 strengthened from vacuous >= 0 checks to log-bounded + session-consistency + seq-uniqueness conjuncts. Mirrors INV9/INV10 patterns. OMS log was least-constrained log in spec; gap closed. No state or action changes."
+        }
+      ],
+      "known_failures": [
+        {
+          "run": "run_20260311_151358",
+          "step": 4,
+          "compartment": "C1",
+          "reason": "P15 deliberately handles old-session pending fills. CEProcessRecoveredPending has msgs_ce_to_ob in UNCHANGED, so phantom CEFinalization claim is baseless."
+        }
+      ],
+      "related_techniques": [],
+      "verification_trail": null,
+      "applicability_notes": "directly instantiated: oms_cached_ce_ts[p] and oms_cached_ob_ts[p][m] implement per-source cursors. OMS accepts CE effects only if session matches cached CE timestamp, and OB effects only if session matches cached OB timestamp. this is the multi-source vector clock pattern."
+    },
+    {
+      "id": "D207",
+      "name": "fire-and-forget archival with idempotent deduplication",
+      "class": "known",
+      "source": {
+        "type": "conversation",
+        "ref": "~/projects/tplus-stuff/notion-management/content/in-progress/pages/docs/downstream-distributed-ordering-architecture.md:66-68"
+      },
+      "description": "multiple services independently submit the same data to archivers without coordination, relying on archiver-side deduplication",
+      "optimizes": [
+        "data availability",
+        "critical path latency",
+        "submission coordination"
+      ],
+      "preconditions": [
+        "archivers can deduplicate by content hash or unique identifier",
+        "submissions are idempotent",
+        "archivers are non-byzantine"
+      ],
+      "trust_requirements": [
+        "archiver availability within recovery window"
+      ],
+      "generalized_form": "if k services each hold a copy of datum D and independently submit D to archiver set A, no coordination between submitters. archiver deduplicates. critical path unblocked because no ack is waited for.",
+      "applications": [
+        {
+          "run": "run_20260311_151358",
+          "step": 1,
+          "compartment": "C3",
+          "outcome": "OK",
+          "notes": "Eliminated ce_archiver_ack_count via session-scoped backup watermark GC. Fixed idempotency bug. Session-aware filter preserves old-session effects for double-crash recovery."
+        }
+      ],
+      "known_failures": [
+        {
+          "run": "run_20260311_151358",
+          "step": 3,
+          "compartment": "C3",
+          "reason": "Proposed INV20 for OB archiver GC is not an invariant: pre-existing records violate it after view change. OB archiver GC also lacks DA safety justification (no L1 anchor for OB)."
+        }
+      ],
+      "related_techniques": [],
+      "verification_trail": null,
+      "applicability_notes": "directly instantiated: oms_archiver_store receives effects without ack on critical path. ce_archiver_ack_count tracks acks separately from ce_log progression. question: does CE block on archiver acks? if so, that violates fire-and-forget and is a candidate optimization."
+    },
+    {
+      "id": "D208",
+      "name": "reactive constraint enforcement on state change",
+      "class": "known",
+      "source": {
+        "type": "conversation",
+        "ref": "~/projects/tplus-stuff/notion-management/content/in-progress/pages/docs/downstream-distributed-ordering-architecture.md:177-181"
+      },
+      "description": "apply mutations optimistically and run a reactive constraint checker after every state change that might violate constraints",
+      "optimizes": [
+        "latency of state mutations",
+        "handling of asynchronous constraint changes"
+      ],
+      "preconditions": [
+        "constraint violations are detectable after the fact",
+        "corrective actions are cheap and automated",
+        "constraints change asynchronously"
+      ],
+      "trust_requirements": [
+        "constraint checker runs on every relevant state change"
+      ],
+      "generalized_form": "apply mutations immediately, trigger constraint check after every state change that could affect constraint C, and emit corrective mutations if C is violated.",
+      "applications": [
+        {
+          "run": "run_20260311_151358",
+          "step": 4,
+          "compartment": "C3",
+          "outcome": "OK",
+          "notes": "Added ~oms_muted guard to OMSConsumeCE, OMSConsumeOB, OMSConsumePending. Prevents consumption while muted that would be wiped by OMSViewChange."
+        }
+      ],
+      "known_failures": [],
+      "related_techniques": [],
+      "verification_trail": null,
+      "applicability_notes": "medium: CEProcessFill validates fill before producing MFR+Snapshot pair. OB produces fills optimistically and CE reacts. question: are there constraint checks in CE that could be deferred to reactive post-processing, reducing CE critical path latency?"
+    },
+    {
+      "id": "D209",
+      "name": "uniform effect log pattern across heterogeneous services",
+      "class": "known",
+      "source": {
+        "type": "conversation",
+        "ref": "~/projects/tplus-stuff/notion-management/content/in-progress/pages/docs/unified-da-ordering-architecture.md:47-72"
+      },
+      "description": "impose the same structural pattern (deterministic leader + monotonic signed effect log + fire-and-forget replication + archiver DA) across all services",
+      "optimizes": [
+        "spec uniformity",
+        "implementation reuse",
+        "reasoning simplicity"
+      ],
+      "preconditions": [
+        "each service has a single sequencer (leader) per scope",
+        "service outputs can be modeled as an append-only effect log",
+        "DA and replication are separable concerns"
+      ],
+      "trust_requirements": [
+        "leader integrity (TEE or equivalent)"
+      ],
+      "generalized_form": "replace N distinct replication designs with a single pattern: scoped leader produces signed monotonically-sequenced effects, fire-and-forget to backups and archivers, consumers subscribe to effect stream.",
+      "applications": [],
+      "known_failures": [
+        {
+          "run": "run_20260311_151358",
+          "step": 2,
+          "compartment": "C3",
+          "reason": "Unified action loses independent WF on backup ingest path. TLA+ WF on nondeterministic choice does not distribute to branches. Backup DA path can be starved."
+        }
+      ],
+      "related_techniques": [],
+      "verification_trail": null,
+      "applicability_notes": "directly instantiated: CE, OB, and OMS each follow this exact pattern (primary seq, log, archiver_store, broadcast). the spec is the canonical instantiation. analysis should check whether all three services maintain structural parity or have asymmetric gaps."
+    },
+    {
+      "id": "D210",
+      "name": "semantically-neutral message batching",
+      "class": "known",
+      "source": {
+        "type": "conversation",
+        "ref": "~/projects/tplus-stuff/notion-management/content/in-progress/pages/docs/unified-da-ordering-architecture.md:71-73"
+      },
+      "description": "batch multiple effects into a single network message for bandwidth efficiency, ensuring batch boundaries carry no semantic meaning",
+      "optimizes": [
+        "network bandwidth",
+        "message overhead"
+      ],
+      "preconditions": [
+        "ordering is determined by per-effect sequence numbers, not batch membership",
+        "consumers can unpack and apply effects individually",
+        "consumers can request individual effects on gap detection"
+      ],
+      "trust_requirements": [
+        "none"
+      ],
+      "generalized_form": "if effects e_1..e_k are individually sequenced and self-describing, grouping them into batch B = [e_1..e_k] for transport is purely a bandwidth optimization. B carries no ordering or finalization semantics.",
+      "applications": [],
+      "known_failures": [],
+      "related_techniques": [
+        "D004"
+      ],
+      "verification_trail": null,
+      "applicability_notes": "high: msgs_ce_broadcast, msgs_ob_broadcast contain individual effect records. effects are self-describing (type, seq, session). batching is transparent since seq determines order. directly applicable as bandwidth optimization."
+    }
+  ],
+  "novel_techniques": [
+    {
+      "id": "T_novel_001",
+      "name": "fill-snapshot-collapse",
+      "class": "candidate-novel",
+      "source": {
+        "type": "agent-discovered",
+        "ref": "run_20260311_151358/C1/step_003"
+      },
+      "description": "collapse atomic MFR+Snapshot pair into single MFR effect when downstream consumers are type-agnostic",
+      "optimizes": [
+        "sequence space efficiency",
+        "protocol simplicity"
+      ],
+      "preconditions": [
+        "downstream consumers do not branch on effect type",
+        "the paired effect types serve no independent semantic role"
+      ],
+      "trust_requirements": [],
+      "generalized_form": "when a protocol produces N typed effects atomically per event but no consumer distinguishes the types, collapse to 1 effect. reduces seq-space consumption by N-1 per event.",
+      "applications": [
+        {
+          "run": "run_20260311_151358",
+          "step": 3,
+          "compartment": "C1",
+          "outcome": "OK",
+          "notes": "Collapsed MFR+Snapshot to single MFR per fill. Halved seq consumption per fill."
+        }
+      ],
+      "known_failures": [],
+      "related_techniques": [],
+      "verification_trail": {
+        "novelty_check": "pending",
+        "generality_check": "pending",
+        "triad_review": "pending"
+      }
+    }
+  ]
+}

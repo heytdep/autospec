@@ -1,0 +1,81 @@
+{
+  "compartment": "C3",
+  "step": 1,
+  "status": "OK",
+  "failure_reason": null,
+  "hard_gate": {
+    "ran": false,
+    "passed": null,
+    "verifier": "TLC",
+    "note": "TLC unavailable - no Java runtime"
+  },
+  "structural_verification": {
+    "ran": true,
+    "claim_substantiated": true,
+    "evidence": "All 3 sub-claims verified: (1) ce_archiver_ack_count removed (13 locations, |CEArchivers|*MaxSeq ints), (2) idempotency: original action re-fires indefinitely, modified self-disables, (3) session scoping: filter e.session /= ce_primary preserves old-session effects."
+  },
+  "technique_registry_update": {
+    "action": "updated",
+    "technique_id": "D207"
+  },
+  "proposal": {
+    "technique": "D207",
+    "technique_name": "fire-and-forget archival with idempotent deduplication",
+    "target_actions": ["ArchiverGCByAcks"],
+    "claim": "Replacing ce_archiver_ack_count with a session-scoped backup watermark check eliminates one state variable without weakening P19 (ArchiverDAMonotonicity) or P18 (CEArchiverSafetyGuarantee), fixes the idempotency bug, and scopes GC to current-session effects only so old-session archiver data is preserved for double-crash recovery.",
+    "preconditions": "The spec has exactly one CE backup (ce_backup_applied is a single set, not per-replica). ArchiverGCByAcks models backup-to-archiver ack propagation as a counter ce_archiver_ack_count[a][s] that increments each time the action fires for (a, s). There is no guard preventing re-counting the same backup confirmation. With one backup, the maximum meaningful ack count is 1, making GC_K > 1 structurally unreachable through legitimate means but trivially reachable through re-firing. ArchiverGCByCheckpoint provides an independent, authoritative GC path via L1 checkpoint. Effects in ce_archiver_store carry a .session field identifying which CE primary session produced them.",
+    "structural_delta": "State complexity: before = |CEArchivers| * MaxSeq integers (ce_archiver_ack_count). After = 0 new variables. ce_archiver_ack_count is eliminated. ArchiverGCByAcks becomes a session-scoped watermark-based GC that removes only current-session effects with seq <= MaxOfSet(ce_backup_applied), preserving all old-session effects unconditionally. P19 is rewritten with session-aware disjuncts and no vacuous escape.",
+    "rationale": "REVISION addressing two critical flaws from round 0. (1) Session-scoped GC: The original watermark filter {e : e.seq > watermark} was session-blind, causing cross-session data loss on double-crash. The reviewer demonstrated a concrete trace: after view change, new-session backup progress creates a watermark that GC's old-session effects. The fix adds e.session /= ce_primary to the GC filter, so only current-session effects are removed by watermark GC. Old-session effects survive in the archiver until checkpoint advances past them (ArchiverGCByCheckpoint is the only path that removes old-session data). (2) P19 without vacuous disjunct: The original revision included 'ce_backup_applied = {}' as a third disjunct, making P19 trivially true after every CEViewChange. The fix removes this escape hatch. The revised P19 states: an effect in the archiver is valid if (a) e.seq > ce_checkpoint_seq (not yet checkpointed), OR (b) e.session /= ce_primary (old-session effect, not touchable by watermark GC), OR (c) ce_backup_applied /= {} /\\ e.seq > MaxOfSet(ce_backup_applied) (current-session effect above watermark). When ce_backup_applied = {}, only disjuncts (a) and (b) apply. Disjunct (b) covers all old-session effects. Disjunct (a) covers current-session effects that haven't been checkpointed. The GC guard ce_backup_applied /= {} prevents any watermark GC when backup_applied is empty, so no current-session effects can be removed in that window, and disjunct (a) constrains them. (3) Liveness guard: ArchiverGCByAcks now requires ce_alive, preventing GC during recovery windows when ce_backup_applied hasn't been populated yet for the new session. (4) Idempotency guard: The action checks that the archiver actually contains at least one current-session effect with seq <= watermark before firing, preventing spurious re-firing on already-clean stores. (5) All 6 UNCHANGED clauses referencing ce_archiver_ack_count are enumerated explicitly.",
+    "novel_technique_description": null
+  },
+  "review": {
+    "verdict": "APPROVE",
+    "precondition_check": {
+      "valid": true,
+      "issues": []
+    },
+    "claim_analysis": {
+      "falsified": false,
+      "counterexample": null,
+      "partial_issues": [
+        "The claim states the fix 'eliminates one state variable without weakening P18'. P18 remains vulnerable to a pre-existing scenario: backup crashes, broadcast lost, then GC fires and removes the last archived copy. This is equivalent to the original spec at GC_K=1 (one backup, one ack = GC). The proposal does not regress P18 but the 'without weakening' language overstates the guarantee. A future hardening could add a ce_backup_alive guard to the GC action."
+      ]
+    },
+    "property_preservation": {
+      "safe": true,
+      "concerns": [
+        "P19 (ArchiverDAMonotonicity): correctly rewritten. Three disjuncts: (a) e.seq > ce_checkpoint_seq, (b) e.session /= ce_primary, (c) ce_backup_applied /= {} /\\ e.seq > MaxOfSet(ce_backup_applied). After view change, ce_backup_applied={} and ce_primary=new_session. Old-session effects: disjunct (b) holds (session mismatch). New-session effects: none exist yet immediately after view change; as they appear, disjunct (a) holds (checkpoint hasn't advanced). Once backup populates ce_backup_applied, the GC guard ce_backup_applied /= {} enables watermark GC, and disjunct (c) constrains surviving effects above the watermark. No vacuous escape.",
+        "P18 (CEArchiverSafetyGuarantee): not regressed. GC only removes current-session effects with seq <= watermark. For any s in ce_backup_applied, if the archived copy is GC'd, P18 still holds via disjunct 2 (broadcast) or disjunct 3 (backup alive + in log). The pre-existing vulnerability (backup crash + broadcast loss + GC) existed at GC_K=1 in the original spec.",
+        "P7 (ArchiverDedup): unaffected. GC only removes, never adds.",
+        "P8 (OMSDerivedState): unaffected. No OMS state changes.",
+        "P1 (TypeInvariant): ce_archiver_ack_count was not in TypeInvariant. Removal is clean."
+      ]
+    },
+    "hidden_regressions": [],
+    "diff_correctness": {
+      "valid": true,
+      "issues": [
+        "The revised diff enumerates all 6 UNCHANGED clauses explicitly (ArchiverIngestCE, ArchiverIngestCEFromBackup, ArchiverIngestOB, ArchiverIngestOBPending, ArchiverIngestOMS, ArchiverGCByCheckpoint) with exact line references. The archiverVars definition change is shown. The VARIABLES declaration removal is shown. The Init removal is shown. Actions using UNCHANGED archiverVars (CEViewChange line 322, etc.) are transitively covered by the archiverVars tuple redefinition.",
+        "GC_K constant becomes unused by any action or invariant after this change. It remains in CONSTANTS and in comments. Harmless but could be cleaned up in a separate pass."
+      ]
+    },
+    "summary": "The revision correctly addresses both critical flaws from round 0. Fix 1 (session-scoping): the GC filter now uses 'e.session /= ce_primary \\/ e.seq > watermark', preserving all old-session effects unconditionally. The round-0 counterexample (cross-session watermark pollution causing old-session data loss on double crash) is fully mitigated because old-session effects have e.session /= ce_primary and are excluded from GC. Fix 2 (P19 vacuity): the vacuous 'ce_backup_applied = {}' disjunct is removed. The new formulation uses three disjuncts that are individually meaningful: checkpoint coverage, session mismatch, and above-watermark. When ce_backup_applied is empty, the GC guard prevents any watermark removal, and P19 constrains via disjuncts (a) and (b) only. The ce_alive guard is a sound addition preventing GC during CE downtime when ce_primary still reflects the old session. All UNCHANGED clauses are accounted for. One pre-existing P18 concern noted (backup-crash + broadcast-loss + GC) but this is not a regression from the original spec."
+  },
+  "judgment": {
+    "ruling": "ACCEPT",
+    "reasoning": "The revised proposal correctly addresses both critical flaws from round 0. Session-scoped GC is sound: CEViewChange sets ce_primary to new_session and clears ce_backup_applied. The GC filter {e : e.session /= ce_primary \\/ e.seq > watermark} preserves all old-session effects unconditionally because their session field never equals the new ce_primary. The round-0 counterexample (cross-session watermark erasure on double crash) is fully closed. P19 is no longer vacuous: the escape disjunct 'ce_backup_applied = {}' is removed. The three remaining disjuncts are individually constraining: (a) seq above checkpoint, (b) session mismatch covering all old-session effects, (c) current-session effects above watermark. When ce_backup_applied = {}, the GC guard blocks the action entirely, so no watermark GC can occur, and only disjuncts (a) and (b) need to hold, which they do for all reachable states. P18 is not regressed: GC removes only current-session effects with seq <= watermark; for any such s in ce_backup_applied, P18 disjunct 3 (ce_backup_alive /\\ e in ce_log : e.seq = s /\\ e.session = ce_primary) holds while backup is alive. The pre-existing P18 vulnerability (backup crash + broadcast loss + GC at GC_K=1) is not introduced by this change. The ce_alive guard is correct: during recovery, ce_primary still reflects the crashed session until CEViewChange fires, so without ce_alive the GC would see current-session effects from the crashed session and incorrectly remove them before the new session is established.",
+    "proposer_claim_assessment": "Accurate. The claim that ce_archiver_ack_count is eliminated without weakening P19 or P18 is verified. The 'without weakening P18' language is slightly overstated given the pre-existing vulnerability (noted by reviewer), but that scenario exists at GC_K=1 in the original spec and is not introduced here. All five enumerated fixes in the rationale are structurally valid. The idempotency guard (action checks archiver contains at least one current-session effect with seq <= watermark) correctly prevents spurious re-firing.",
+    "reviewer_objections_assessment": [
+      {
+        "objection": "P18 'without weakening' language overstates the guarantee given backup-crash + broadcast-loss + GC scenario",
+        "assessment": "Valid observation. The scenario is pre-existing at GC_K=1 in the original spec. This proposal does not regress P18 and the reviewer correctly classifies it as a future hardening opportunity (ce_backup_alive guard on ArchiverGCByAcks), not a blocker for acceptance."
+      },
+      {
+        "objection": "GC_K constant becomes unused after this change",
+        "assessment": "Correct. GC_K remains in CONSTANTS and comments but is no longer referenced by any action or invariant. Harmless; deferred to a cleanup pass. Not a correctness issue."
+      }
+    ],
+    "property_essence_risk": "Low. P19 is strengthened (vacuous disjunct removed, session-awareness added). P18 is not regressed. P7 (ArchiverDedup) and P8 (OMSDerivedState) are unaffected. TypeInvariant is clean because ce_archiver_ack_count was not included there. The core DA monotonicity guarantee is preserved and more precisely expressed than in the original spec.",
+    "notes_for_journal": "Session-scoping of GC via e.session /= ce_primary is the correct pattern for multi-session archiver state. ce_primary advances monotonically (new_session = ce_primary + 1), so old-session effects are permanently identifiable by session field alone, independent of sequence numbers. This makes session-scoped watermark GC composable with checkpoint GC: watermark GC handles current-session cleanup, checkpoint GC handles cross-session cleanup when checkpoint advances past old-session seqs. The ce_alive guard on ArchiverGCByAcks is a non-obvious but important addition: during recovery, ce_primary still reflects the crashed session until CEViewChange fires, so without ce_alive the GC would see current-session effects from the crashed session and incorrectly GC them before the new session is established. The orphaned GC_K constant is minor technical debt from eliminating the ack-count mechanism entirely; a future pass should remove it from CONSTANTS and the model cfg."
+  }
+}

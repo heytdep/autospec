@@ -1,0 +1,45 @@
+{
+  "run_id": "sample_run",
+  "step": 2,
+  "compartment": "C2",
+  "timestamp": "2026-03-10T10:05:00Z",
+  "status": "FAIL",
+  "proposal": {
+    "technique": "T004",
+    "technique_name": "redundant mechanism elimination",
+    "target_actions": [
+      "TruncateLog"
+    ],
+    "claim": "TruncateLog is redundant because CommitEntry already manages log consistency",
+    "structural_delta": "remove one action, simplify log management",
+    "diff": "--- a/log_replication.tla\n+++ b/log_replication.tla\n@@ -30,8 +30,0 @@\n-TruncateLog(replica, index) ==\n-  /\\ log' = [log EXCEPT ![replica] = SubSeq(log[replica], 1, index)]"
+  },
+  "review": {
+    "verdict": "REJECT",
+    "argument": "TruncateLog is used by C3 for surgical rollback. removing it breaks ViewChangeLogIntegrity.",
+    "counterexample": "view change needs to truncate divergent entries from old leader"
+  },
+  "judgment": {
+    "ruling": "REJECT",
+    "reasoning": "TruncateLog is not redundant, needed by C3 for rollback"
+  },
+  "hard_gate": {
+    "ran": false,
+    "passed": false,
+    "verifier": "TLC",
+    "state_space_before": 98304,
+    "state_space_after": null,
+    "properties_checked": [],
+    "counterexample": null
+  },
+  "structural_verification": {
+    "ran": false,
+    "claim_substantiated": false,
+    "evidence": null
+  },
+  "failure_reason": "triad_rejected",
+  "technique_registry_update": {
+    "action": "failure_recorded",
+    "technique_id": "T004"
+  }
+}

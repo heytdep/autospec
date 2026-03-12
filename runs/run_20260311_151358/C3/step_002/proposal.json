@@ -1,0 +1,75 @@
+{
+  "step": 2,
+  "compartment": "C3",
+  "technique": "D209",
+  "technique_name": "uniform effect log pattern across heterogeneous services",
+  "target_actions": ["ArchiverIngestCE", "ArchiverIngestCEFromBackup"],
+  "claim": "ArchiverIngestCE and ArchiverIngestCEFromBackup store identical records ({type, seq, session}) into ce_archiver_store; the only difference is the source (broadcast channel vs backup-held log). Unify into a single ArchiverIngestCE action with a disjunctive source guard, eliminating a redundant action definition and one fairness conjunct.",
+  "rationale": "Both actions produce the same effect on ce_archiver_store: union with {[type |-> eff.type, seq |-> eff.seq, session |-> eff.session]}. The archiver is non-TEE and source-agnostic (D107, D109: archivers store self-authenticating effects, origin is irrelevant). Splitting into two actions implies a structural distinction that does not exist at the archiver level. The unified action nondeterministically reads from either source when enabled, preserving all reachable states while reducing action count by 1 and fairness conjuncts by 1.",
+  "properties_preserved": ["P1", "P7", "P8", "P11", "P15", "P16", "P17", "P18", "P19"],
+  "properties_analysis": {
+    "P7_ArchiverDedup": "stored record shape is identical in both paths ({type, seq, session}). set union is idempotent. dedup invariant trivially preserved.",
+    "P18_CEArchiverSafetyGuarantee": "P18 requires that backup-applied effects are either archived, in broadcast, or on live backup. the unified action still archives from both sources. backup path remains enabled when ce_backup_alive /\\ ce_backup_applied /= {}. broadcast path remains enabled when msgs_ce_broadcast /= {}. no data path is lost.",
+    "P19_ArchiverDAMonotonicity": "GC conditions (ArchiverGCByAcks, ArchiverGCByCheckpoint) are unchanged. the unified action only adds to ce_archiver_store, never removes. monotonicity preserved."
+  },
+  "diff": {
+    "description": "Replace ArchiverIngestCE + ArchiverIngestCEFromBackup with a single unified ArchiverIngestCE that nondeterministically sources from broadcast OR backup.",
+    "removed_lines": {
+      "ArchiverIngestCE_original": [
+        "ArchiverIngestCE(a) ==",
+        "    /\\ a \\in CEArchivers",
+        "    /\\ \\E eff \\in msgs_ce_broadcast :",
+        "        /\\ ce_archiver_store' = [ce_archiver_store EXCEPT ![a] = @ \\union",
+        "               {[type |-> eff.type, seq |-> eff.seq, session |-> eff.session]}]",
+        "    /\\ UNCHANGED <<ceVars, obVars, omsVars, cacheVars,",
+        "                   msgVars,",
+        "                   ce_archiver_ack_count, ob_archiver_store, ob_archiver_pending,",
+        "                   oms_archiver_store, obBackupVars>>"
+      ],
+      "ArchiverIngestCEFromBackup_original": [
+        "ArchiverIngestCEFromBackup(a) ==",
+        "    /\\ a \\in CEArchivers",
+        "    /\\ ce_backup_alive",
+        "    /\\ \\E s \\in ce_backup_applied :",
+        "        /\\ \\E eff \\in ce_log :",
+        "            /\\ eff.seq = s",
+        "            /\\ ce_archiver_store' = [ce_archiver_store EXCEPT ![a] = @ \\union",
+        "                   {[type |-> eff.type, seq |-> eff.seq, session |-> eff.session]}]",
+        "    /\\ UNCHANGED <<ceVars, obVars, omsVars, cacheVars,",
+        "                   msgVars,",
+        "                   ce_archiver_ack_count, ob_archiver_store, ob_archiver_pending,",
+        "                   oms_archiver_store, obBackupVars>>"
+      ]
+    },
+    "added_lines": {
+      "ArchiverIngestCE_unified": [
+        "\\* Archiver ingests CE effect from broadcast or backup (unified source)",
+        "ArchiverIngestCE(a) ==",
+        "    /\\ a \\in CEArchivers",
+        "    /\\ \\E eff \\in",
+        "           msgs_ce_broadcast",
+        "           \\union",
+        "           (IF ce_backup_alive",
+        "            THEN {e \\in ce_log : e.seq \\in ce_backup_applied}",
+        "            ELSE {}) :",
+        "        /\\ ce_archiver_store' = [ce_archiver_store EXCEPT ![a] = @ \\union",
+        "               {[type |-> eff.type, seq |-> eff.seq, session |-> eff.session]}]",
+        "    /\\ UNCHANGED <<ceVars, obVars, omsVars, cacheVars,",
+        "                   msgVars,",
+        "                   ce_archiver_ack_count, ob_archiver_store, ob_archiver_pending,",
+        "                   oms_archiver_store, obBackupVars>>"
+      ]
+    },
+    "next_relation_change": {
+      "remove": "\\/ ArchiverIngestCEFromBackup(a)",
+      "context": "inside \\E a \\in CEArchivers disjunction, remove the ArchiverIngestCEFromBackup(a) disjunct"
+    },
+    "fairness_change": {
+      "remove": "/\\ WF_vars(ArchiverIngestCEFromBackup(a))",
+      "context": "inside \\A a \\in CEArchivers fairness conjunction, remove the ArchiverIngestCEFromBackup fairness conjunct. the single WF_vars(ArchiverIngestCE(a)) now covers both sources."
+    }
+  },
+  "full_tla_diff": "--- a/spec.tla\n+++ b/spec.tla\n@@ ArchiverIngestCE section @@\n-\\* Archiver ingests CE effect from broadcast\n+\\* Archiver ingests CE effect from broadcast or backup (unified source)\n ArchiverIngestCE(a) ==\n     /\\ a \\in CEArchivers\n-    /\\ \\E eff \\in msgs_ce_broadcast :\n-        /\\ ce_archiver_store' = [ce_archiver_store EXCEPT ![a] = @ \\union\n-               {[type |-> eff.type, seq |-> eff.seq, session |-> eff.session]}]\n-    /\\ UNCHANGED <<ceVars, obVars, omsVars, cacheVars,\n-                   msgVars,\n-                   ce_archiver_ack_count, ob_archiver_store, ob_archiver_pending,\n-                   oms_archiver_store, obBackupVars>>\n-\n-\\* Archiver ingests CE effect from backup\n-ArchiverIngestCEFromBackup(a) ==\n-    /\\ a \\in CEArchivers\n-    /\\ ce_backup_alive\n-    /\\ \\E s \\in ce_backup_applied :\n-        /\\ \\E eff \\in ce_log :\n-            /\\ eff.seq = s\n-            /\\ ce_archiver_store' = [ce_archiver_store EXCEPT ![a] = @ \\union\n-                   {[type |-> eff.type, seq |-> eff.seq, session |-> eff.session]}]\n-    /\\ UNCHANGED <<ceVars, obVars, omsVars, cacheVars,\n-                   msgVars,\n-                   ce_archiver_ack_count, ob_archiver_store, ob_archiver_pending,\n-                   oms_archiver_store, obBackupVars>>\n+    /\\ \\E eff \\in\n+           msgs_ce_broadcast\n+           \\union\n+           (IF ce_backup_alive\n+            THEN {e \\in ce_log : e.seq \\in ce_backup_applied}\n+            ELSE {}) :\n+        /\\ ce_archiver_store' = [ce_archiver_store EXCEPT ![a] = @ \\union\n+               {[type |-> eff.type, seq |-> eff.seq, session |-> eff.session]}]\n+    /\\ UNCHANGED <<ceVars, obVars, omsVars, cacheVars,\n+                   msgVars,\n+                   ce_archiver_ack_count, ob_archiver_store, ob_archiver_pending,\n+                   oms_archiver_store, obBackupVars>>\n \n@@ Next relation @@\n     \\/ \\E a \\in CEArchivers :\n         \\/ ArchiverIngestCE(a)\n-        \\/ ArchiverIngestCEFromBackup(a)\n         \\/ ArchiverGCByAcks(a)\n         \\/ ArchiverGCByCheckpoint(a)\n \n@@ Fairness @@\n     /\\ \\A a \\in CEArchivers :\n         /\\ WF_vars(ArchiverIngestCE(a))\n-        /\\ WF_vars(ArchiverIngestCEFromBackup(a))\n",
+  "state_space_impact": "reduces action count by 1 (2 actions -> 1). the unified action's enabled set is the union of both original enabled sets, so no reachable state is lost. the nondeterministic choice over the union of sources means TLC explores the same transitions as before but with fewer action labels. net effect: slight reduction in TLC exploration overhead due to one fewer disjunct in Next.",
+  "risk_assessment": "low. the stored record is structurally identical. the only subtlety is that the unified source set could contain duplicates (same effect in both broadcast and backup-held log), but set union on ce_archiver_store is idempotent, so this is harmless."
+}

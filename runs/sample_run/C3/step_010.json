@@ -1,0 +1,51 @@
+{
+  "run_id": "sample_run",
+  "step": 10,
+  "compartment": "C3",
+  "timestamp": "2026-03-10T10:45:00Z",
+  "status": "OK",
+  "proposal": {
+    "technique": "novel",
+    "technique_name": "lazy view change propagation",
+    "target_actions": [
+      "InitiateViewChange",
+      "CollectViewChangeMessages",
+      "InstallNewView"
+    ],
+    "claim": "defer VC broadcast, new leader pulls from quorum. O(n^2) -> O(n) communication",
+    "structural_delta": "communication complexity during view change: O(n^2) -> O(n)",
+    "diff": "--- a/view_change.tla\n+++ b/view_change.tla\n InitiateViewChange(replica) ==\n-  /\\ Broadcast(replica, <<\"vc\", view_number[replica] + 1, log[replica]>>)\n+  /\\ vc_pending' = [vc_pending EXCEPT ![replica] = <<view_number[replica]+1, log[replica]>>]\n+PullViewChangeState(new_leader, replica) ==\n+  /\\ vc_pending[replica] # <<>>\n+  /\\ vc_messages' = ...",
+    "novel_technique_description": "defer broadcast when next phase only partially reads, pull on demand with TEE/quorum consistency"
+  },
+  "review": {
+    "verdict": "APPROVE",
+    "argument": "pull-based works: quorum suffices, TEE prevents equivocation on pulled state"
+  },
+  "judgment": {
+    "ruling": "ACCEPT",
+    "reasoning": "novel and sound. TEE + quorum intersection guarantee consistency."
+  },
+  "hard_gate": {
+    "ran": true,
+    "passed": true,
+    "verifier": "TLC",
+    "state_space_before": 58100,
+    "state_space_after": 52400,
+    "properties_checked": [
+      "ViewMonotonicity",
+      "RollbackSafety",
+      "ViewChangeLogIntegrity"
+    ],
+    "counterexample": null
+  },
+  "structural_verification": {
+    "ran": true,
+    "claim_substantiated": true,
+    "evidence": "n*(n-1) messages -> n/2+1 messages"
+  },
+  "failure_reason": null,
+  "technique_registry_update": {
+    "action": "added",
+    "technique_id": "T006"
+  }
+}

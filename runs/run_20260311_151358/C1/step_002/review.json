@@ -1,0 +1,43 @@
+{
+  "verdict": "REJECT",
+  "precondition_check": {
+    "valid": true,
+    "issues": []
+  },
+  "claim_analysis": {
+    "falsified": true,
+    "counterexample": "The claim that contiguity is purely a gap-detection/equivocation-prevention measure is false. Contiguity also guarantees a structural invariant consumed by ArchiverGCByAcks (line 691): when GC fires on s=MaxOfSet(ce_backup_applied), contiguity ensures the backup holds ALL of 1..s, so the GC removing archiver entries for seqs <= s is safe because the backup has a complete copy. Without contiguity, backup could hold {1,5} and GC on s=5 removes archiver entries for 1-5. Seqs 2,3,4 are now ONLY in ce_log and msgs_ce_broadcast. If the broadcast messages are lost (async model allows this, see MessageLoss actions) and then the backup crashes, those seqs are ONLY in ce_log. Then if CE crashes, they are gone and archivers do not have them. P18 (INV19) is scoped to ce_alive, so it does not protect this scenario. But P19/ArchiverDAMonotonicity combined with the liveness argument (spec lines 1001-1006) assumes archival happens before GC, which is weakened because GC can now race ahead of archival for the gap seqs.",
+    "partial_issues": [
+      "The claim 'TEE non-equivocation makes gap detection unnecessary for safety' conflates two distinct roles of the contiguity guard: (1) equivocation detection, and (2) ensuring MaxOfSet(ce_backup_applied) represents a COMPLETE prefix, not a sparse set. D101 addresses role (1) but not role (2).",
+      "The claim 'higher anchor on view change and reducing data loss window' is true for liveness but the anchor's semantic meaning changes: it goes from 'backup has complete copy through anchor' to 'backup has SOME subset with max = anchor'. This is a semantic regression even if the immediate invariants still hold."
+    ]
+  },
+  "property_preservation": {
+    "safe": false,
+    "concerns": [
+      "P18 (CEArchiverSafetyGuarantee): The three-way disjunction holds for seqs IN ce_backup_applied, but the proposal enables ArchiverGCByAcks to GC seqs NOT in ce_backup_applied (gap seqs between min and max of the sparse set). These gap seqs lose archiver coverage without being tracked by any safety property. Concrete trace: CE produces seqs 1-5. Backup applies {1,3,5} (out of order, skipping 2,4). ArchiverGCByAcks fires on s=5, archiver GCs seqs 1-5. MessageLoss drops broadcast msgs for seqs 2,4. Now seqs 2,4 are only in ce_log. Backup crashes. Seqs 2,4 only in ce_log. CE crashes. View change: anchor = checkpoint (backup dead), recovered = MaxContiguousFrom(checkpoint+1, archivers). Archivers GC'd everything through 5. If checkpoint < 5, recovery gaps appear. Data for seqs 2,4 is lost.",
+      "P12 (CEBackupAppliedValid): Technically preserved per the formal definition (every s in ce_backup_applied has a corresponding ce_log entry). The concern is not P12 itself but the downstream CONSUMPTION of ce_backup_applied by ArchiverGCByAcks, which implicitly relied on contiguity.",
+      "P4 (SurgicalRollbackPrecision): The log trim {e in ce_log : e.seq <= recovered} is safe in isolation. But if archiver GC raced ahead (as above), recovered could be lower than expected, causing unnecessarily aggressive rollback. This is a liveness/optimality regression, not a safety violation of P4 itself."
+    ]
+  },
+  "hidden_regressions": [
+    {
+      "description": "ArchiverGCByAcks semantic change",
+      "detail": "ArchiverGCByAcks (line 691) uses 's \\in ce_backup_applied' as trigger and GCs '{e \\in @ : e.seq > s}' (keeps only seqs > s). With contiguous ce_backup_applied, this is safe: backup has all of 1..s. Without contiguity, GC on s=max removes archiver entries for gap seqs that the backup never applied. The GC action's correctness IMPLICITLY depends on contiguity. The proposal's diff does not modify ArchiverGCByAcks, creating a hidden regression.",
+      "severity": "high",
+      "trace": "CEProduceDirectEffect(1,2,3,4,5) -> CEBackupApply({1,3,5}) -> ArchiverGCByAcks(s=5) -> MessageLoss(seqs 2,4) -> CEBackupCrash -> CECrash -> CEViewChange: archivers missing 2,4, anchor=checkpoint"
+    },
+    {
+      "description": "State space explosion for TLC",
+      "detail": "The proposal acknowledges increased state space but understates it. With MaxSeq=5, the current contiguous backup has 6 reachable states for ce_backup_applied ({}, {1}, {1,2}, ..., {1,2,3,4,5}). Without contiguity, ce_backup_applied can be any subset of 1..5 = 32 states. This is a 5x blowup per variable, compounding with other variables. For MaxSeq=8, it goes from 9 to 256 states.",
+      "severity": "low"
+    }
+  ],
+  "diff_correctness": {
+    "valid": true,
+    "issues": [
+      "The TLA+ syntax is correct. The diff accurately removes the contiguity guard and replaces it with a set-membership check. The UNCHANGED list is identical. No mechanical errors."
+    ]
+  },
+  "summary": "REJECT. The proposal correctly identifies that TEE non-equivocation (D101) eliminates the need for contiguity as an equivocation-detection mechanism. However, it misses that contiguity serves a second structural role: it ensures MaxOfSet(ce_backup_applied) represents a complete prefix, which ArchiverGCByAcks (line 691) implicitly relies on. ArchiverGCByAcks fires on any s in ce_backup_applied and GCs archiver entries for all seqs <= s. Without contiguity, gap seqs (those between applied seqs in the sparse set) lose archiver coverage without compensating protection. A concrete trace shows data loss for gap seqs when broadcast messages are lost, backup crashes, then CE crashes. The fix would be to either (a) modify ArchiverGCByAcks to only GC up to the max contiguous prefix of ce_backup_applied, or (b) keep the proposal but add an explicit safety property covering gap seqs' archiver coverage, or (c) change the GC trigger from MaxOfSet to a contiguous-prefix calculation. The proposal should be revised to address the GC interaction before it can be approved."
+}

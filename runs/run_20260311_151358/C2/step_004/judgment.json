@@ -1,0 +1,40 @@
+{
+  "step": 4,
+  "compartment": "C2",
+  "technique": "D206",
+  "verdict": "ACCEPT",
+  "confidence": 0.90,
+
+  "ruling": "Proposal accepted. The trace is valid and fully reproducible from the spec. The fix is mechanically correct and compositionally clean with step 2.",
+
+  "basis": {
+    "trace_confirmed": true,
+    "trace_notes": "OBProduceEffect includes session in Fill messages. CEProcessFill consumes from msgs_ob_to_ce and constructs the MFR without echoing that session. OBReceiveMFR has no OB session guard. Post-OBViewChange, ob_primary advances but msgs_ob_to_ce retains stale Fills. The phantom CEFinalization path is closed.",
+    "fix_confirmed": true,
+    "fix_notes": "Echo is a pure message field addition (no new state variables). Guard is a conjunct addition to OBReceiveMFR's existential (no UNCHANGED clause changes required). Both changes are minimal and reversible.",
+    "orthogonality_confirmed": true,
+    "orthogonality_notes": "Step 2 guards CE session staleness (msg.session = ob_cached_ce_session[m]). Step 4 guards OB session staleness (msg.ob_session = ob_primary[m]). Independent failure modes, independent guards, no field collision. Combined guard after both steps: msg.market = m /\\ msg.session = ob_cached_ce_session[m] /\\ msg.ob_session = ob_primary[m]."
+  },
+
+  "property_preservation": "All properties preserved. P3/P5/P10/P13/P14 verified by reviewer and unchallenged. P1 caveat (ob_session field invisible to TypeInvariant) matches existing spec pattern.",
+
+  "open_observations": [
+    {
+      "id": "R1",
+      "description": "Stale MFRs with wrong ob_session accumulate under strong fairness (LoseCEtoOB has no fairness constraint). Matches existing msgs_view_change pattern. Not a blocker.",
+      "disposition": "acknowledged, no action required"
+    },
+    {
+      "id": "R2",
+      "description": "OBFinalizationFillCoherence property not formally defined. Appropriate deferral to a future properties pass.",
+      "disposition": "track for properties pass"
+    },
+    {
+      "id": "R3",
+      "description": "Multiple stale Fills from same defunct OB session produce multiple stale MFRs. All blocked post-OBViewChange. No partial acceptance scenario.",
+      "disposition": "verified correct, no action required"
+    }
+  ],
+
+  "risk": "low"
+}

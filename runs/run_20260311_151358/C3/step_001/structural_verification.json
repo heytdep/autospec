@@ -1,0 +1,70 @@
+{
+  "verdict": "PASS",
+  "sub_claims": [
+    {
+      "id": "SC1",
+      "label": "state_elimination",
+      "verdict": "PASS",
+      "evidence": {
+        "original_presence": [
+          "spec.tla:85  — ce_archiver_ack_count declared in VARIABLES block",
+          "spec.tla:108 — ce_archiver_ack_count included in archiverVars tuple",
+          "spec.tla:151 — TypeInvariant: \\A a \\in CEArchivers : \\A s \\in 1..MaxSeq : ce_archiver_ack_count[a][s] \\in Nat",
+          "spec.tla:193 — Init: ce_archiver_ack_count = [a \\in CEArchivers |-> [s \\in 1..MaxSeq |-> 0]]",
+          "spec.tla:695,697 — ArchiverGCByAcks reads and mutates ce_archiver_ack_count",
+          "spec.tla:634,648,661,675,687,714 — six UNCHANGED clauses list ce_archiver_ack_count",
+          "spec.tla:1012 — P19 disjunct: ce_archiver_ack_count[a][e.seq] < GC_K"
+        ],
+        "modified_absence": "grep ce_archiver_ack_count spec_modified.tla → 0 matches (confirmed)",
+        "modified_archiverVars": "spec_modified.tla:107-108 — archiverVars == <<ce_archiver_store, ob_archiver_store, ob_archiver_pending, oms_archiver_store>> — ce_archiver_ack_count removed, no new variable added",
+        "state_count": "Init line 193 in original: domain is CEArchivers x 1..MaxSeq, so |CEArchivers| * MaxSeq integers. Eliminated entirely. Replacement state introduced: none."
+      },
+      "notes": "Variable fully excised from VARIABLES, TypeInvariant, archiverVars, Init, all UNCHANGED clauses, the action body, and P19. No replacement variable introduced."
+    },
+    {
+      "id": "SC2",
+      "label": "idempotency_bug_fix",
+      "verdict": "PASS",
+      "evidence": {
+        "original_double_fire_trace": [
+          "spec.tla:693 — only guard: s \\in ce_backup_applied. This is a set membership test; ce_backup_applied is not modified by this action, so the guard remains true on every subsequent fire.",
+          "spec.tla:695-696 — ce_archiver_ack_count[a][s] increments unconditionally: no check whether GC already occurred or count already reached GC_K.",
+          "spec.tla:697 — GC fires when count+1 >= GC_K but counter continues to grow on each re-fire with no ceiling, inflating past GC_K.",
+          "Result: the action can fire arbitrarily many times for the same (a, s) after the GC already executed, with no enabling condition that becomes false."
+        ],
+        "modified_idempotency": [
+          "spec_modified.tla:691 — guard: ce_backup_applied /= {}",
+          "spec_modified.tla:692 — watermark == MaxOfSet(ce_backup_applied) (deterministic, no mutable counter)",
+          "spec_modified.tla:693-694 — enabling condition: \\E e \\in ce_archiver_store[a] : e.session = ce_primary /\\ e.seq <= watermark",
+          "spec_modified.tla:695-696 — effect removes exactly those qualifying effects: {e \\in @ : e.session /= ce_primary \\/ e.seq > watermark}",
+          "After first fire: all current-session effects with seq <= watermark are gone. The existential at lines 693-694 finds no qualifying effect. Action is disabled until watermark advances (i.e., new effects ingested at higher seq and backup_applied grows). Natural idempotency via state exhaustion."
+        ]
+      },
+      "notes": "Original bug confirmed at spec.tla:693-697. Modified version self-disables after first GC for any given (session, watermark) pair. No counter needed and no overflow possible."
+    },
+    {
+      "id": "SC3",
+      "label": "session_scoping",
+      "verdict": "PASS",
+      "evidence": {
+        "original_filter": "spec.tla:698-699 — {e \\in @ : e.seq > s}. Session-blind: removes all effects with seq <= s regardless of which session produced them. An effect from a prior session with seq <= current watermark would be deleted.",
+        "modified_filter": "spec_modified.tla:695-696 — {e \\in @ : e.session /= ce_primary \\/ e.seq > watermark}",
+        "filter_analysis": {
+          "old_session_effects": "e.session /= ce_primary is TRUE for old-session effects. First disjunct satisfied. Effect is KEPT unconditionally.",
+          "current_session_above_watermark": "e.session = ce_primary /\\ e.seq > watermark: second disjunct TRUE. KEPT.",
+          "current_session_at_or_below_watermark": "e.session = ce_primary /\\ e.seq <= watermark: both disjuncts FALSE. REMOVED (this is the GC target)."
+        },
+        "p19_alignment": [
+          "spec_modified.tla:1003-1011 — ArchiverDAMonotonicity has three disjuncts for CE archiver effects:",
+          "  (a) e.seq > ce_checkpoint_seq — not yet checkpointed, safe to hold",
+          "  (b) e.session /= ce_primary — old-session effect, immune to watermark GC",
+          "  (c) ce_backup_applied /= {} /\\ e.seq > MaxOfSet(ce_backup_applied) — current-session effect above watermark",
+          "Old-session effects satisfy disjunct (b) regardless of seq. They can only be removed by ArchiverGCByCheckpoint (spec_modified.tla:703-711), which is gated on ce_checkpoint_seq advancing past e.seq.",
+          "Note: P19 in original (spec.tla:1008-1012) used ce_archiver_ack_count[a][e.seq] < GC_K as the second disjunct — session-blind and tied to the eliminated counter."
+        ]
+      },
+      "notes": "Session scoping structurally enforced by both the GC filter predicate and the revised P19. Old-session effects are preserved in ce_archiver_store until checkpoint path advances."
+    }
+  ],
+  "overall_notes": "All three sub-claims verified against specific lines in both specs. The files are distinct: spec.tla has ce_archiver_ack_count in 13 locations; spec_modified.tla has 0. The structural delta is internally consistent: state removal is complete with no orphan references, the idempotency fix is mechanically sound via existential self-disabling, and session scoping is correctly expressed in both the GC filter and the updated P19 invariant."
+}

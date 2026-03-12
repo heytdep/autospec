@@ -1,0 +1,49 @@
+{
+  "run_id": "sample_run",
+  "step": 4,
+  "compartment": "C2",
+  "timestamp": "2026-03-10T10:15:00Z",
+  "status": "OK",
+  "proposal": {
+    "technique": "T005",
+    "technique_name": "state variable elimination",
+    "target_actions": [
+      "ReplicateEntry",
+      "AppendEntry"
+    ],
+    "claim": "next_index is always match_index + 1, eliminating it reduces state space",
+    "structural_delta": "state space: remove one variable, reduce by factor of domain(next_index)",
+    "diff": "--- a/log_replication.tla\n+++ b/log_replication.tla\n VARIABLES log, commit_index, match_index\n-VARIABLES next_index"
+  },
+  "review": {
+    "verdict": "APPROVE",
+    "argument": "next_index = match_index + 1 is invariant in all reachable states"
+  },
+  "judgment": {
+    "ruling": "ACCEPT",
+    "reasoning": "derivability confirmed"
+  },
+  "hard_gate": {
+    "ran": true,
+    "passed": true,
+    "verifier": "TLC",
+    "state_space_before": 87210,
+    "state_space_after": 54120,
+    "properties_checked": [
+      "LogMatching",
+      "LeaderCompleteness",
+      "StateMachineSafety"
+    ],
+    "counterexample": null
+  },
+  "structural_verification": {
+    "ran": true,
+    "claim_substantiated": true,
+    "evidence": "state space reduced from 87210 to 54120"
+  },
+  "failure_reason": null,
+  "technique_registry_update": {
+    "action": "updated",
+    "technique_id": "T005"
+  }
+}

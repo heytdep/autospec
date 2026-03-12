@@ -1,0 +1,45 @@
+{
+  "step": 2,
+  "compartment": "C3",
+  "technique": "D209",
+  "verdict": "reject",
+  "ruling": "reviewer_sustained",
+  "confidence": 0.95,
+  "summary": "The fairness weakening identified by the reviewer is valid and dispositive. The proposal is rejected.",
+  "reasoning": {
+    "core_finding": "Dropping WF_vars(ArchiverIngestCEFromBackup(a)) at spec line 835 removes an independent liveness guarantee. The original two-WF structure guarantees that each path fires eventually when independently enabled. The unified WF_vars(ArchiverIngestCE(a)) only guarantees the unified action fires when its disjunctive precondition holds; it does not guarantee the backup branch is ever selected.",
+    "tla_semantics": "WF_vars(A) means: if A is continuously enabled from some point forward, A eventually fires. For the unified action, enabledness is satisfied whenever EITHER msgs_ce_broadcast is non-empty OR (ce_backup_alive /\\ ce_backup_applied /= {}). If msgs_ce_broadcast never drains (effects keep arriving via broadcast), the action is perpetually enabled and WF forces it to fire, but the nondeterministic choice over the union set permits the scheduler to always select from msgs_ce_broadcast. The backup branch can be starved indefinitely. The original spec closes this with a separate WF conjunct that makes the backup action independently guaranteed regardless of broadcast state.",
+    "p18_impact": "P18 (CEArchiverSafetyGuarantee) relies on the backup path being live for the DA scenario where broadcast messages are lost via LoseCEBroadcast (spec lines 721-724). When broadcast is lost, archivers must eventually read from the backup path to archive effects that were applied there. Without independent WF on the backup action, a schedule exists where the archiver never processes backup-applied effects after a LoseCEBroadcast event, breaking the liveness argument behind P18's DA guarantee.",
+    "proposer_claim_assessed": "The proposer's claim that 'the single WF_vars(ArchiverIngestCE(a)) now covers both sources' is incorrect under TLA+ semantics. WF on an action with a nondeterministic internal choice does not distribute into WF on each choice branch. This is a well-known TLA+ pitfall: WF(A \\/ B) does not imply WF(A) /\\ WF(B).",
+    "secondary_issues": {
+      "source_set_semantics_mismatch": "The reviewer's medium-severity flag on cross-session seq matching is noted but does not change the verdict. The behavior is equivalent to the original double-existential and ce_backup_applied is scoped to the current session post-surgical-rollback.",
+      "state_space_claim": "The reviewer correctly notes the TLC overhead claim is overstated. Minor; does not affect verdict."
+    },
+    "salvage_path": "The reviewer's option (2) is technically correct: define separate sub-actions ArchiverIngestCEBroadcast(a) and ArchiverIngestCEBackup(a), each with their own WF conjunct, and optionally wrap in an ArchiverIngestCE(a) definition for Next. However, as the reviewer notes, this defeats the purpose of unification. The original two-action structure is cleaner and should be retained."
+  },
+  "disposition": {
+    "apply_proposal": false,
+    "reason": "Critical fairness weakening on P18 liveness path. WF on unified disjunctive action does not preserve independent liveness of backup branch.",
+    "spec_unchanged": true
+  },
+  "review_issues_ruled_on": [
+    {
+      "tag": "fairness_weakening",
+      "severity_confirmed": "critical",
+      "ruling": "sustained",
+      "judge_note": "Verified against spec lines 833-835 and 721-724. The reviewer's TLA+ semantics analysis is correct."
+    },
+    {
+      "tag": "source_set_semantics_mismatch",
+      "severity_confirmed": "medium",
+      "ruling": "noted, non-dispositive",
+      "judge_note": "Semantically equivalent to original given session scoping of ce_backup_applied. Not a bug."
+    },
+    {
+      "tag": "state_space_claim_imprecise",
+      "severity_confirmed": "low",
+      "ruling": "sustained",
+      "judge_note": "Proposal overstates TLC overhead reduction. Not a correctness issue."
+    }
+  ]
+}

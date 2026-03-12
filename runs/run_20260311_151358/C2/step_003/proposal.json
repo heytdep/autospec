@@ -1,0 +1,69 @@
+{
+  "step": 3,
+  "compartment": "C2",
+  "technique": "D205",
+  "technique_name": "broadcast replication for zero-latency failover (session re-tagging on recovery)",
+  "target_actions": ["OBViewChange"],
+  "claim": "OBViewChange retains recovered effects in ob_log but does not re-tag them with the new session or re-broadcast them, stranding downstream OMS consumers whose session filter rejects old-session effects for sequence numbers below the recovery watermark",
+  "severity": "structural gap in OB-to-OMS data-plane continuity across view changes",
+  "properties_affected": [],
+  "properties_note": "No existing properties catch this. P3 (OBSequenceMonotonic) and P10 (OBLogBounded) hold because the re-tagged effects preserve seq values and the log bound. The gap is a liveness issue: OMS gets permanently stuck waiting for effects that will never arrive under the new session. A new property OBRecoveredEffectsAccessible would detect this.",
+  "analysis": {
+    "problem": "OBViewChange (line 428-453) prunes ob_log to {e in @ : e.seq <= recovered} but these retained effects still carry the OLD session tag (ob_primary[m] before increment). The view change message broadcasts last_recovered to downstream, and DownstreamOMSReceiveOBViewChange (line 604-620) rolls back oms_ob_cursor to MinOfTwo(current, vc.last_recovered). If OMS cursor was behind the recovery watermark (oms_ob_cursor < last_recovered), OMS needs to consume effects from cursor+1 to last_recovered. But OMSConsumeOB (line 480) requires eff.session = ob_primary[m], which is now the NEW session. The retained effects in msgs_ob_broadcast have the OLD session. OMS cannot consume them.",
+    "root_cause": "OBViewChange increments ob_primary (session) but does not update the session tag on recovered log entries or re-broadcast them. The session acts as an epoch barrier that blocks downstream consumption of pre-recovery effects.",
+    "trace": [
+      "1. OB market m, session=1, produces effects seq=1..5, broadcast to msgs_ob_broadcast[m]",
+      "2. OMS partition p consumes up to seq=2 (oms_ob_cursor[p][m] = 2)",
+      "3. OB crashes (OBCrash(m))",
+      "4. OBViewChange(m): new_session=2, recovered=4 (seq 5 lost from archivers)",
+      "5. ob_log[m] = {e in old_log : e.seq <= 4}, all with session=1",
+      "6. ob_primary[m] = 2, ob_seq[m] = 5",
+      "7. msgs_ob_broadcast[m] unchanged: still has old session=1 effects",
+      "8. OMS receives OB view change: oms_ob_cursor[p][m] = MinOfTwo(2, 4) = 2",
+      "9. OMS tries OMSConsumeOB(p, m): needs seq=3 with session=ob_primary[m]=2",
+      "10. No effect with (seq=3, session=2) exists in msgs_ob_broadcast[m]",
+      "11. New OB produces at seq=5+ with session=2. Seq 3,4 are never re-produced",
+      "12. OMS is permanently stuck at cursor=2 for market m"
+    ],
+    "cascade_to_oms_view_change": "OMSViewChange (line 510-539) also cannot help. It calls OBArchiverSeqsForSession(m, ob_primary[m]) which filters by new session=2. Archivers only have session=1 effects. So OMSViewChange recovers nothing for market m, leaving oms_ob_cursor stuck.",
+    "fix_description": "OBViewChange re-tags recovered log entries with new_session and re-broadcasts them to msgs_ob_broadcast. This makes the recovered prefix available under the new session epoch, allowing OMS (and OB backup) to consume them. ArchiverIngestOB will also pick them up under the new session, enabling OMSViewChange archiver catch-up.",
+    "session_retag_safety": "Re-tagging is safe because: (1) the old session is defunct (ob_primary incremented), (2) the recovered effects form a contiguous prefix that the new session 'inherits' as canonical history, (3) seq uniqueness within the new session holds since no new-session effect exists yet for seq <= recovered, (4) backup_applied is cleared so no stale references exist."
+  },
+  "diff": {
+    "description": "One change to the ORIGINAL spec: OBViewChange re-tags recovered effects with new session and re-broadcasts them",
+    "unified_diff": "--- a/spec.tla\n+++ b/spec.tla\n@@ -427,6 +427,8 @@\n \\* OB view change\n OBViewChange(m) ==\n     /\\ ~ob_alive[m]\n     /\\ LET new_ts == ob_authority_ts[m] + 1\n            new_session == ob_primary[m] + 1\n            anchor == IF ob_backup_applied[m] /= {}\n                      THEN MaxOfSet(ob_backup_applied[m])\n                      ELSE 0\n            available == OBArchiverSeqsForSession(m, ob_primary[m])\n            recovered == MaxContiguousFrom(anchor + 1, available)\n+           recovered_effs == {[e EXCEPT !.session = new_session] :\n+                               e \\in {x \\in ob_log[m] : x.seq <= recovered}}\n-       IN /\\ ob_primary' = [ob_primary EXCEPT ![m] = new_session]\n+       IN /\\ ob_primary' = [ob_primary EXCEPT ![m] = new_session]\n           /\\ ob_authority_ts' = [ob_authority_ts EXCEPT ![m] = new_ts]\n-          /\\ ob_log' = [ob_log EXCEPT ![m] = {e \\in @ : e.seq <= recovered}]\n+          /\\ ob_log' = [ob_log EXCEPT ![m] = recovered_effs]\n           /\\ ob_seq' = [ob_seq EXCEPT ![m] = recovered + 1]\n           /\\ ob_pending_seq' = [ob_pending_seq EXCEPT ![m] = 1]\n           /\\ ob_pending_log' = [ob_pending_log EXCEPT ![m] = {}]\n           /\\ ob_alive' = [ob_alive EXCEPT ![m] = TRUE]\n           /\\ ob_backup_applied' = [ob_backup_applied EXCEPT ![m] = {}]\n+          /\\ msgs_ob_broadcast' = [msgs_ob_broadcast EXCEPT ![m] = @ \\union recovered_effs]\n           /\\ msgs_view_change' = msgs_view_change \\union\n                  {[svc |-> \"OB\",\n                    market |-> m,\n                    ts |-> new_ts,\n                    session |-> new_session,\n                    last_recovered |-> recovered]}\n-    /\\ UNCHANGED <<ceVars, omsVars, cacheVars,\n-                   msgs_ce_broadcast, msgs_ce_to_ob, msgs_ob_to_ce, msgs_ob_broadcast,\n+    /\\ UNCHANGED <<ceVars, omsVars, cacheVars,\n+                   msgs_ce_broadcast, msgs_ce_to_ob, msgs_ob_to_ce,\n                    archiverVars>>",
+    "changes": [
+      {
+        "location": "OBViewChange LET block (line 430-436), add recovered_effs definition",
+        "old": "           recovered == MaxContiguousFrom(anchor + 1, available)",
+        "new": "           recovered == MaxContiguousFrom(anchor + 1, available)\n           recovered_effs == {[e EXCEPT !.session = new_session] :\n                               e \\in {x \\in ob_log[m] : x.seq <= recovered}}"
+      },
+      {
+        "location": "OBViewChange ob_log' assignment (line 439)",
+        "old": "          /\\ ob_log' = [ob_log EXCEPT ![m] = {e \\in @ : e.seq <= recovered}]",
+        "new": "          /\\ ob_log' = [ob_log EXCEPT ![m] = recovered_effs]"
+      },
+      {
+        "location": "OBViewChange, add msgs_ob_broadcast update (after ob_backup_applied' line 444)",
+        "old": "          /\\ ob_backup_applied' = [ob_backup_applied EXCEPT ![m] = {}]\n          /\\ msgs_view_change' = msgs_view_change \\union",
+        "new": "          /\\ ob_backup_applied' = [ob_backup_applied EXCEPT ![m] = {}]\n          /\\ msgs_ob_broadcast' = [msgs_ob_broadcast EXCEPT ![m] = @ \\union recovered_effs]\n          /\\ msgs_view_change' = msgs_view_change \\union"
+      },
+      {
+        "location": "OBViewChange UNCHANGED clause (line 451-452), remove msgs_ob_broadcast",
+        "old": "    /\\ UNCHANGED <<ceVars, omsVars, cacheVars,\n                   msgs_ce_broadcast, msgs_ce_to_ob, msgs_ob_to_ce, msgs_ob_broadcast,\n                   archiverVars>>",
+        "new": "    /\\ UNCHANGED <<ceVars, omsVars, cacheVars,\n                   msgs_ce_broadcast, msgs_ce_to_ob, msgs_ob_to_ce,\n                   archiverVars>>"
+      }
+    ]
+  },
+  "property_preservation": {
+    "P1_TypeInvariant": "recovered_effs are records with same fields (type, seq, session) where session is now new_session (Nat). All in valid domains.",
+    "P3_OBSequenceMonotonic": "re-tagged effects have unique seqs (inherited from old log via P3). No new-session effect with seq <= recovered exists yet (ob_seq starts at recovered+1). So seq uniqueness per session holds.",
+    "P5_OBNamespaceSeparation": "ob_log only contained non-PendingFill effects before view change (P5 held). Re-tagging preserves type field. PendingFill is excluded.",
+    "P10_OBLogBounded": "all re-tagged effects have seq <= recovered, and ob_seq = recovered + 1. So seq < ob_seq holds.",
+    "P13_OBBackupAppliedValid": "ob_backup_applied cleared to {}. No references to validate.",
+    "P14_OBIndependenceFromCE": "no CE state involved.",
+    "P15_CEPendingRecoveryBounded": "ob_pending_seq reset to 1. Unrelated to pending archiver store."
+  },
+  "verification_suggestion": "Model check with Markets={m1}, Partitions={p1}, MaxSeq=5. Trace: OB produces 4 effects, OMS consumes 2, OB crashes, OB view change recovers 3. Without fix: OMS stuck at cursor=2. With fix: OMS can consume re-tagged effects at seq=3 with new session, advancing to cursor=3.",
+  "risk_assessment": "Low risk. Re-tagging recovered effects and re-broadcasting them is additive. The session tag update ensures downstream consumers see a consistent epoch. Old-session effects in the broadcast become irrelevant (filtered by session guard). The key invariant preserved: after OBViewChange, ob_log entries all carry the new session, matching ob_primary[m]."
+}

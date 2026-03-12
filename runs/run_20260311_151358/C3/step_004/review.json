@@ -1,0 +1,33 @@
+{
+  "step": 4,
+  "compartment": "C3",
+  "technique": "D208",
+  "verdict": "accept",
+  "confidence": 0.88,
+  "severity": "medium",
+  "summary": "Proposal correctly identifies a real gap: OMS consumption actions fire while muted, then OMSViewChange wipes the consumed effects. The proposer's archival completeness framing slightly overstates severity, but the cursor-advancing-then-being-overwritten interaction is genuinely problematic and the fix is clean.",
+  "analysis": {
+    "bug_confirmed": true,
+    "trace_validated": "The trace is correct. After OMSRecover (line 562-568), alive=TRUE and muted=TRUE while cursors, log, and seq are UNCHANGED (preserved from pre-crash state). OMSConsumeCE (line 461) checks oms_alive[p] but not ~oms_muted[p], so it fires. Effect goes into oms_log, cursor advances, seq advances.",
+    "critical_interaction": "OMSViewChange (line 510-539) computes ce_caught_up = MaxContiguousFrom(oms_ce_cursor[p] + 1, ce_available). Because consumption during the muted period advanced oms_ce_cursor, the catch-up starts PAST the already-consumed effects. Those effects were in oms_log (now wiped at line 524) but if ArchiverIngestOMS had not yet copied them, they are lost from the OMS archival path. The cursor in the new session skips over them, so they will never be re-consumed.",
+    "severity_assessment": "Medium, not high. The effects are not globally lost: they exist in CE/OB archivers and broadcast channels. The loss is specific to the OMS archival path. OMS archivers may have a gap for the OMS-sequenced copies. Whether this matters depends on whether anything reads exclusively from OMS archivers expecting contiguity. The spec does not have an explicit OMS archival completeness invariant, so no specified property is violated. However, the behavior is semantically wrong: muted means 'not operational, catching up', and consumption during this period is wasted work that can produce archiver gaps.",
+    "archiver_race_window": "WF(ArchiverIngestOMS) guarantees eventual ingestion, but between OMSConsumeCE and OMSViewChange there is a finite window where the archiver may not have fired. In small models this race is easily reachable. The proposal is right that the window exists.",
+    "cursor_overwrite_detail": "Even if we ignore the archival concern, there is a subtler issue. OMSViewChange line 516 uses the CURRENT cursor (which consumption advanced) to compute catch-up. So if cursor was at K before crash, consumption advanced it to K+1, and OMSViewChange computes MaxContiguousFrom(K+2, archivers). If the archiver has seq K+1 (from CE archiver, not OMS archiver), this skips it entirely. If it does not, cursor stays at K+1 which matches the already-consumed-but-wiped effect. Either way the interaction is fragile and unintended.",
+    "fix_assessment": "Adding ~oms_muted[p] to the three consumption guards is the minimal correct fix. It ensures consumption only happens in unmuted (operationally valid) state. OMSViewChange handles catch-up from archivers, which is the designed recovery path. No liveness risk: WF on OMSUnmute and archiver actions guarantees progress."
+  },
+  "property_impact": {
+    "P7_ArchiverDedup": "not affected. Fix restricts when effects enter oms_log, does not change dedup properties of CE archivers.",
+    "P8_OMSDerivedState": "not affected. Effect types consumed are unchanged, only timing of consumption changes.",
+    "P11_OMSCursorConsistency": "not affected. Cursors remain non-negative. Fix only gates when cursors advance.",
+    "INV18_OMSMutedUntilCaughtUp": "not affected. This invariant constrains the unmuted state. Fix does not change OMSUnmute logic.",
+    "spanning_properties": "P1, P6, P15-P19: unaffected. Fix reduces enabled actions during muted period, does not alter any other action's logic."
+  },
+  "state_space": "reduces. Three actions become disabled when muted, eliminating interleaving states during recovery.",
+  "objections": [
+    {
+      "point": "severity overstatement",
+      "detail": "Proposal claims 'OMS archival completeness is violated' and 'downstream consumers reading from OMS archivers see a non-contiguous effect history'. The spec has no explicit OMS archival completeness property (unlike INV19 for CE archivers). The consequence is real but unspecified, so calling it a property violation is slightly overstated. Severity is medium (semantic incorrectness, potential archiver gap) not high (no specified invariant broken)."
+    }
+  ],
+  "dispositive_question": "none. The code path is clear and the fix is unambiguous."
+}

@@ -1,0 +1,60 @@
+{
+  "compartment": "C3",
+  "step": 3,
+  "status": "FAIL",
+  "failure_reason": "Proposed INV20 replacement (e.session >= ob_primary[e.market]) fails immediately after OBViewChange: pre-existing archiver records have session < new ob_primary. Also lacking DA safety justification for OB archiver GC.",
+  "hard_gate": {
+    "ran": false,
+    "passed": false
+  },
+  "structural_verification": {
+    "ran": false,
+    "claim_substantiated": false
+  },
+  "technique_registry_update": {
+    "action": "failure_recorded",
+    "technique_id": "D207"
+  },
+  "proposal": {
+    "technique": "D207",
+    "technique_name": "fire-and-forget archival with idempotent deduplication",
+    "target_actions": ["ArchiverIngestOB", "INV20_ArchiverDAMonotonicity"],
+    "claim": "OB archiver stores grow without bound because no GC action exists for ob_archiver_store. Adding session-scoped OB archiver GC is safe because all consumers query OBArchiverSeqsForSession with current session only."
+  },
+  "review": {
+    "verdict": "reject",
+    "confidence": 0.95,
+    "critical_issues": [
+      {
+        "tag": "inv20_not_invariant",
+        "description": "The proposed INV20 replacement conjunct is NOT an invariant. After OBViewChange(m), ob_primary[m] increments to S+1 while ob_archiver_store retains pre-existing session S records (ob_archiver_store is UNCHANGED by OBViewChange at line 452). Those records have e.session = S < ob_primary[e.market] = S+1, violating the proposed invariant immediately without any new ingest."
+      }
+    ],
+    "medium_issues": [
+      {
+        "tag": "gc_deletes_pre_vc_ingested_effects",
+        "description": "OB archiver GC lacks DA safety justification. Original spec intentionally retains OB archiver data indefinitely (line 997). CE has checkpoint/L1 anchor path; OB does not. Removing old-session OB archiver data without equivalent external persistence mechanism is unjustified."
+      }
+    ]
+  },
+  "judgment": {
+    "verdict": "reject",
+    "ruling": "Reviewer is correct. The proposed INV20 replacement conjunct is not an invariant. Pre-existing archiver records from session S survive OBViewChange intact: ob_archiver_store is UNCHANGED by OBViewChange (line 452), so any effect ingested during session S remains in the store after ob_primary advances to S+1. Those records have e.session = S < ob_primary[e.market] = S+1, violating the proposed invariant immediately and without any new ingest.",
+    "critical_findings": [
+      {
+        "tag": "inv20_not_invariant",
+        "disposition": "sustained"
+      }
+    ],
+    "medium_findings": [
+      {
+        "tag": "gc_deletes_pre_vc_ingested_effects",
+        "disposition": "sustained_as_open_question"
+      }
+    ],
+    "required_for_resubmission": [
+      "Either remove the INV20 conjunct entirely and rely only on the original CE-only conjunct with an updated comment, OR reformulate so the invariant does not require e.session >= ob_primary[e.market] for records that predate the current view",
+      "Provide trust-model or spec-level justification that old-session OB archiver data is safe to discard (i.e., cite an external persistence mechanism equivalent to CE's L1/checkpoint anchor), or withdraw the GC action and document the asymmetry as intentional"
+    ]
+  }
+}

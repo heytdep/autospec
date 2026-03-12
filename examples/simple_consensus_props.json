@@ -1,0 +1,26 @@
+[
+  {
+    "id": "P1",
+    "statement": "Agreement",
+    "essence": "no two replicas ever decide on different values",
+    "type": "safety"
+  },
+  {
+    "id": "P2",
+    "statement": "Validity",
+    "essence": "any decided value must have been proposed by a leader",
+    "type": "safety"
+  },
+  {
+    "id": "P3",
+    "statement": "QuorumRequired",
+    "essence": "decisions only happen when a strict majority of replicas have acknowledged",
+    "type": "safety"
+  },
+  {
+    "id": "P4",
+    "statement": "SignatureIntegrity",
+    "essence": "signatures correspond to actual messages sent by the signing replica",
+    "type": "security"
+  }
+]

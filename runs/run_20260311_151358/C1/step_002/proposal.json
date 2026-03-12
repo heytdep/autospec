@@ -1,0 +1,29 @@
+{
+  "step": 2,
+  "compartment": "C1",
+  "technique": "D101",
+  "technique_name": "non-equivocation elimination",
+  "target_actions": ["CEBackupApply"],
+  "claim": "CEBackupApply's strict sequential contiguity guard (eff.seq = next_expected) exists to detect gaps that could signal equivocation or tampering. Under TEE non-equivocation (D101), the primary cannot produce conflicting effects for the same sequence number, so gaps are purely a network reordering artifact. Relaxing backup application to accept any current-session effect not yet applied allows the backup to make progress despite message reordering, yielding a higher anchor on view change and reducing data loss window.",
+  "structural_change": "Remove the contiguity guard from CEBackupApply. Replace strict sequential requirement with set-membership check (effect not already applied, session matches). This is safe because: (1) TEE non-equivocation guarantees each seq has exactly one canonical effect, (2) the backup only applies effects matching current session, (3) view change anchor via MaxOfSet(ce_backup_applied) remains correct since all applied seqs exist in ce_log (produced by TEE primary), (4) MaxContiguousFrom(anchor+1, archivers) extends correctly from the anchor.",
+  "property_analysis": {
+    "P2_CESequenceMonotonic": "PRESERVED. ce_log production unchanged. Backup application does not modify ce_log.",
+    "P4_SurgicalRollbackPrecision": "PRESERVED. View change log trim and anchor logic unchanged.",
+    "P9_CELogBounded": "PRESERVED. ce_log production unchanged.",
+    "P12_CEBackupAppliedValid": "PRESERVED. Backup still only applies effects from msgs_ce_broadcast with matching session. Every such effect was produced by CEProduceDirectEffect or CEProcessFill, which adds the effect to ce_log atomically with broadcast. Therefore every applied seq exists in ce_log.",
+    "P1_TypeInvariant": "PRESERVED. ce_backup_applied remains subset of 1..MaxSeq.",
+    "P6_PhantomLeaderRejection": "PRESERVED. Backup application does not touch authority_ts or view_change messages.",
+    "P16_DownstreamCacheCoherence": "PRESERVED. No cache variables touched.",
+    "P17_OMSMutedUntilCaughtUp": "PRESERVED. No OMS variables touched.",
+    "P18_CEArchiverSafetyGuarantee": "PRESERVED. The three-way disjunction (archived OR in broadcast OR backup+log) still holds. Backup applying out-of-order does not remove effects from any path.",
+    "P19_ArchiverDAMonotonicity": "PRESERVED. Archiver stores and GC conditions unchanged."
+  },
+  "trust_model_justification": "CE runs in TEE. Trust model states: 'TEE provides integrity, non-equivocation, message authenticity' and 'D101 applicable'. The contiguity guard is a gap-detection mechanism. TEE non-equivocation makes gap detection unnecessary for safety: gaps are network artifacts, not Byzantine behavior. The guard can be safely removed.",
+  "diff": {
+    "description": "Replace strict sequential contiguity guard in CEBackupApply with session-match-only set-membership check",
+    "old_text": "CEBackupApply ==\n    /\\ ce_alive\n    /\\ ce_backup_alive\n    /\\ \\E eff \\in msgs_ce_broadcast :\n        /\\ eff.session = ce_primary\n        /\\ LET next_expected == IF ce_backup_applied = {}\n                                THEN 1\n                                ELSE MaxOfSet(ce_backup_applied) + 1\n           IN /\\ eff.seq = next_expected\n              /\\ ce_backup_applied' = ce_backup_applied \\union {eff.seq}\n    /\\ UNCHANGED <<ce_alive, ce_seq, ce_log, ce_primary, ce_authority_ts,\n                   ce_checkpoint_seq, ce_last_recovered_seq, ce_backup_alive,\n                   ce_recovered_pending,\n                   msgVars, obVars, omsVars, cacheVars, archiverVars, obBackupVars>>",
+    "new_text": "CEBackupApply ==\n    /\\ ce_alive\n    /\\ ce_backup_alive\n    /\\ \\E eff \\in msgs_ce_broadcast :\n        /\\ eff.session = ce_primary\n        /\\ eff.seq \\notin ce_backup_applied\n        /\\ ce_backup_applied' = ce_backup_applied \\union {eff.seq}\n    /\\ UNCHANGED <<ce_alive, ce_seq, ce_log, ce_primary, ce_authority_ts,\n                   ce_checkpoint_seq, ce_last_recovered_seq, ce_backup_alive,\n                   ce_recovered_pending,\n                   msgVars, obVars, omsVars, cacheVars, archiverVars, obBackupVars>>"
+  },
+  "fail_journal_entry": null,
+  "risk_notes": "The change increases the state space for TLC because backup can now apply effects in any order. For model checking with small MaxSeq this is manageable. The anchor computation via MaxOfSet(ce_backup_applied) may now return a value where not all preceding seqs are in ce_backup_applied, but this is safe because all preceding seqs ARE in ce_log (the authoritative source)."
+}

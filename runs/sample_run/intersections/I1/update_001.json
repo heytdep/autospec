@@ -1,0 +1,10 @@
+{
+  "step": 7,
+  "source_compartment": "C1",
+  "type": "variable_simplification",
+  "description": "leader election votes no longer carry signatures (TEE exploitation)",
+  "affected_vars": [
+    "leader"
+  ],
+  "status": "committed"
+}
