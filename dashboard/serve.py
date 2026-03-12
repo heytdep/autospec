@@ -9,9 +9,9 @@ from pathlib import Path
 from urllib.parse import urlparse, parse_qs
 
 AUTOSPEC_ROOT = Path(__file__).resolve().parent.parent
-RUNS_DIR = Path(os.environ.get("AUTOSPEC_RUNS_DIR", AUTOSPEC_ROOT / "runs"))
+RUNS_DIR = Path(os.environ.get("JOBQUEUE_RUNS_DIR", AUTOSPEC_ROOT / "runs"))
 DASHBOARD_DIR = AUTOSPEC_ROOT / "dashboard"
-JOBS_DIR = Path(os.environ.get("AUTOSPEC_JOBS_DIR", "")) if os.environ.get("AUTOSPEC_JOBS_DIR") else None
+JOBS_DIR = Path(os.environ.get("JOBQUEUE_JOBS_DIR", "")) if os.environ.get("JOBQUEUE_JOBS_DIR") else None
 
 
 def read_json(path):

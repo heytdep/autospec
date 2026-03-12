@@ -67,7 +67,7 @@ The orchestrator:
 1. Resolve `AUTOSPEC_ROOT` from the invocation context (the directory containing `program.md`).
 2. Read the spec, properties, and trust model.
 3. Detect the verifier: TLA+ -> TLC, Lean -> lean, ProVerif -> proverif. If verifier is not available, log this explicitly and proceed in degraded mode (hard gate skipped with `hard_gate: "skipped"` in every journal).
-4. Create the run directory: if `$AUTOSPEC_RUNS_DIR` is set, use `$AUTOSPEC_RUNS_DIR/run_<timestamp>/`; otherwise use `$AUTOSPEC_ROOT/runs/run_<timestamp>/`.
+4. Create the run directory: if `$JOBQUEUE_RUNS_DIR` is set, use `$JOBQUEUE_RUNS_DIR/run_<timestamp>/`; otherwise use `$AUTOSPEC_ROOT/runs/run_<timestamp>/`.
 5. Launch the `autospec-seeder` agent (sonnet) to initialize the techniques registry.
 6. Launch the `autospec-compartmentalizer` agent (sonnet) to split the spec.
 7. Wait for both. Send writer INIT_RUN with: compartmentalization result, seeded registry, config.

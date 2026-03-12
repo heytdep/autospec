@@ -44,22 +44,9 @@ git push
 
 ### 4. Execute job
 
-Read the job's instructions section. Execute based on type:
+Read the job's `type` field. Look up `job-types/<type>.md` in this repo for type-specific execution instructions. If the file exists, follow it. If not, interpret the job's markdown instructions directly.
 
-**autospec jobs:**
-- Set `AUTOSPEC_RUNS_DIR=$AUTOSPEC_ROOT/techniques/runs`
-- Invoke the autospec skill with the parameters from the instructions
-- After each autospec step or natural breakpoint, commit and push intermediate results:
-  ```bash
-  cd $AUTOSPEC_ROOT/techniques
-  git add runs/
-  git commit -m "progress: <job_id> step N"
-  git push
-  ```
-
-**arbitrary jobs:**
-- Follow the markdown instructions directly
-- Commit and push results at natural breakpoints
+Commit and push results at natural breakpoints during execution.
 
 ### 5. Complete or fail
 
@@ -70,7 +57,7 @@ git mv jobs/active/<job>.md jobs/completed/<job>.md
 Update frontmatter:
 - Set `status: completed`
 - Add `completed_at: <ISO timestamp>`
-- Add `run_id: <run_id>` (if autospec)
+- Add `run_id: <run_id>` (if applicable, per job-type instructions)
 
 **On failure:**
 ```bash
